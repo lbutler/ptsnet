@@ -3,6 +3,7 @@
  * Port of `Initializer.set_wave_speeds` / `_set_segments` from `init.py`.
  */
 import { SteadyState, ResolvedSettings, WaveSpeedMethod } from './types';
+import { roundHalfEven } from './math';
 
 export interface DiscretizationResult {
   numSegments: number;
@@ -45,7 +46,7 @@ export function discretize(ss: SteadyState, settings: ResolvedSettings): Discret
       (Math.abs(pipe.waveSpeed[i] - pipe.desiredWaveSpeed[i]) * 100) / pipe.desiredWaveSpeed[i];
   }
 
-  settings.timeSteps = Math.round(settings.duration / settings.timeStep);
+  settings.timeSteps = roundHalfEven(settings.duration / settings.timeStep);
   return result;
 }
 
@@ -73,7 +74,7 @@ function setSegments(
 
   const intSeg = new Float64Array(n);
   for (let i = 0; i < n; i++) {
-    let s = Math.round(seg[i]);
+    let s = roundHalfEven(seg[i]);
     if (s < 2) s = 2;
     intSeg[i] = s;
   }

@@ -189,16 +189,17 @@ export async function loadInitialConditions(
     const valves = makeValveTable(numValves);
 
     // --- Run hydraulics up to the requested period ---
+    // Mirrors get_initial_conditions in init.py exactly (including its quirk of
+    // calling nextH before the first runH, which advances an EPS model by one
+    // hydraulic step before sampling the initial conditions).
     model.openH();
     model.initH(InitHydOption.NoSave);
     let t = 0;
-    let tstep = Infinity;
-    do {
+    while (model.nextH() > 0 && t <= period) {
       model.runH();
-      if (t >= period) break;
-      tstep = model.nextH();
       t++;
-    } while (tstep > 0);
+    }
+    if (t === 0) model.runH();
 
     const flowUnits = model.getFlowUnits() as unknown as FlowUnit;
 

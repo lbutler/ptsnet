@@ -202,6 +202,41 @@ export function newton(
   return x;
 }
 
+/**
+ * Python float floor-division (`a // b`), reproducing CPython's `float_divmod`.
+ *
+ * This differs from `Math.floor(a / b)`: e.g. `0.5 // 0.05` is 9 in Python even
+ * though `0.5 / 0.05 === 10`. PTSNET uses `//` to turn operation times into time
+ * step indices, so matching it is required for identical valve/pump schedules.
+ */
+export function pyFloorDiv(a: number, b: number): number {
+  let mod = a % b; // JS % is C fmod for floats (truncated remainder)
+  let div = (a - mod) / b;
+  if (mod !== 0) {
+    if (b < 0 !== mod < 0) {
+      mod += b;
+      div -= 1.0;
+    }
+  }
+  let floordiv: number;
+  if (div !== 0) {
+    floordiv = Math.floor(div);
+    if (div - floordiv > 0.5) floordiv += 1.0;
+  } else {
+    floordiv = 0;
+  }
+  return floordiv;
+}
+
+/** Round half to even (banker's rounding), matching numpy.round / Python round. */
+export function roundHalfEven(x: number): number {
+  const floor = Math.floor(x);
+  const diff = x - floor;
+  if (diff < 0.5) return floor;
+  if (diff > 0.5) return floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
+}
+
 /** numpy.cumsum. */
 export function cumsum(arr: ArrayLike<number>): Float64Array {
   const out = new Float64Array(arr.length);

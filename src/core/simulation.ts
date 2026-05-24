@@ -9,7 +9,7 @@ import { discretize } from './discretize';
 import { buildEngineModel, EngineModel } from './serialModel';
 import { SerialEngine } from './engine';
 import { checkCompatibility } from './validation';
-import { cubicSpline, linspace } from './math';
+import { cubicSpline, linspace, roundHalfEven, pyFloorDiv } from './math';
 import { SimulationResults } from './results';
 
 const BUTTERFLY_X = [1, 0.8, 0.6, 0.4, 0.2, 0];
@@ -71,7 +71,7 @@ class ElementSettings {
     if (this.sorted) throw new Error('the simulation has started, settings cannot be added');
     if (X.length !== Y.length) throw new Error('X and Y have different shapes');
     const xx = new Float64Array(X.length);
-    for (let i = 0; i < X.length; i++) xx[i] = Math.floor(X[i] / timeStep);
+    for (let i = 0; i < X.length; i++) xx[i] = pyFloorDiv(X[i], timeStep);
     if (new Set(xx).size !== xx.length) {
       throw new Error('more than one modification per time step');
     }
@@ -142,7 +142,7 @@ function resolveSettings(input: PtsnetSettingsInput = {}): ResolvedSettings {
     waveSpeedMethod: input.waveSpeedMethod ?? 'optimal',
     waveSpeeds: input.waveSpeeds,
     period: input.period ?? 0,
-    timeSteps: Math.round(duration / timeStep),
+    timeSteps: roundHalfEven(duration / timeStep),
   };
 }
 
@@ -256,7 +256,7 @@ export class PtsnetSimulation {
     this.addCurve(valveType, 'valve', BUTTERFLY_X, BUTTERFLY_Y);
     const names = typeof valveNames === 'string' ? [valveNames] : valveNames;
     this.assignCurveTo(valveType, names);
-    const NN = Math.floor((endTime - startTime) / this.settings.timeStep);
+    const NN = pyFloorDiv(endTime - startTime, this.settings.timeStep);
     for (const valve of names) {
       this.defineElementSetting(
         valve,
@@ -270,7 +270,7 @@ export class PtsnetSimulation {
   definePumpOperation(pumpNames: string | string[], options: PumpOperationOptions): void {
     const { initialSetting, finalSetting, startTime = 0, endTime = 1, function: fn = 'linear' } = options;
     if (fn !== 'linear') throw new Error("only 'linear' transient functions are supported");
-    const NN = Math.floor((endTime - startTime) / this.settings.timeStep);
+    const NN = pyFloorDiv(endTime - startTime, this.settings.timeStep);
     const names = typeof pumpNames === 'string' ? [pumpNames] : pumpNames;
     for (const pump of names) {
       this.defineElementSetting(
@@ -288,7 +288,7 @@ export class PtsnetSimulation {
     startTime = 0,
     endTime = 1,
   ): void {
-    const NN = Math.floor((endTime - startTime) / this.settings.timeStep);
+    const NN = pyFloorDiv(endTime - startTime, this.settings.timeStep);
     const names = typeof nodeNames === 'string' ? [nodeNames] : nodeNames;
     for (const node of names) {
       this.defineElementSetting(

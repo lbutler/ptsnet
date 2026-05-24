@@ -1,169 +1,203 @@
-
-<!-- [![Contributors][contributors-shield]][contributors-url] -->
-<!-- [![Forks][forks-shield]][forks-url] -->
-<!-- [![Stargazers][stars-shield]][stars-url] -->
-<!-- [![Issues][issues-shield]][issues-url] -->
-<!-- [![The Unlicense][license-shield]][license-url] -->
-<!-- [![LinkedIn][linkedin-shield]][linkedin-url] -->
-
-
-<!-- PROJECT LOGO -->
-<br />
 <p align="center">
-  <a href="https://github.com/gandresr/PTSNET">
-    <img src="https://github.com/gandresr/PTSNET/raw/development/docs/images/ptsnet_logo.png" alt="Logo" width="650" height="100">
-  </a>
-
-
-  <p align="center">
-    Parallel Transient Simulation in Water Networks
-    <br />
-    <a href="https://github.com/gandresr/PTSNET"><strong>Explore the docs »</strong></a>
-    <br />
-    <br />
-    <a href="https://github.com/gandresr/PTSNET">View Demo</a>
-    ·
-    <a href="https://github.com/gandresr/PTSNET/issues">Report Bug</a>
-    ·
-    <a href="https://github.com/gandresr/PTSNET/issues">Request Feature</a>
-  </p>
+  <img src="https://github.com/gandresr/PTSNET/raw/development/docs/images/ptsnet_logo.png" alt="Logo" width="650" height="100">
 </p>
 
-[![Downloads](https://static.pepy.tech/personalized-badge/ptsnet?period=total&units=international_system&left_color=black&right_color=orange&left_text=Downloads)](https://pepy.tech/project/ptsnet)
-<!-- TABLE OF CONTENTS -->
-<!-- <details open="open">
-  <summary><h2 style="display: inline-block">Table of Contents</h2></summary>
-  <ol>
-    <li>
-      <a href="#about-the-project">About The Project</a>
-      <ul>
-        <li><a href="#built-with">Built With</a></li>
-      </ul>
-    </li>
-    <li>
-      <a href="#getting-started">Getting Started</a>
-      <ul>
-        <li><a href="#prerequisites">Prerequisites</a></li>
-        <li><a href="#installation">Installation</a></li>
-      </ul>
-    </li>
-    <li><a href="#usage">Usage</a></li>
-    <li><a href="#roadmap">Roadmap</a></li>
-    <li><a href="#contributing">Contributing</a></li>
-    <li><a href="#license">License</a></li>
-    <li><a href="#contact">Contact</a></li>
-    <li><a href="#acknowledgements">Acknowledgements</a></li>
-  </ol>
-</details> -->
+<p align="center">
+  <b>ptsnet</b> — Transient Simulation in Water Networks, in TypeScript
+</p>
 
+`ptsnet` is a TypeScript port of [PTSNET](https://github.com/gandresr/PTSNET), a
+simulator for hydraulic transients (water hammer) in water distribution
+networks using the **Method of Characteristics (MOC)**. It runs in Node.js and
+in the browser, and is published as a library.
 
+Steady-state initial conditions are obtained from
+[`epanet-js`](https://github.com/modelcreate/epanet-js) (OWA‑EPANET 2.2); the
+transient solution is computed by a self-contained serial MOC engine.
 
-<!-- ABOUT THE PROJECT -->
-<!-- ## About The Project -->
+> This package is a conversion of the original Python research code. See
+> [Differences from the Python version](#differences-from-the-python-version)
+> and [Python ↔ JavaScript parity](#python--javascript-parity) below.
 
-<!-- [![Product Name Screen Shot][product-screenshot]](https://example.com) -->
+## Installation
 
-<!-- Here's a blank template to get started:
-**To avoid retyping too much info. Do a search and replace with your text editor for the following:**
-`gandresr`, `PTSNET`, `twitter_handle`, `email`, `project_title`, `project_description`
- -->
+```sh
+npm install ptsnet epanet-js
+```
 
-<!-- ### Built With -->
+`epanet-js` is a peer/runtime dependency (it ships the EPANET WASM engine and is
+kept external from the bundle).
 
-<!-- * []()
-* []()
-* []() -->
-
-
-
-<!-- GETTING STARTED -->
-## Getting Started
-
-To get a local copy up and running follow these simple steps. PTSNET can be downloaded via pip
-
-### Installation
-
-We highly encourage using a conda environment for the installation, so that dependencies such as OpenMPI don't have to be manually installed.
-
-* Install conda
-
-  ```sh
-  # Linux
-  https://docs.conda.io/projects/conda/en/latest/user-guide/install/linux.html
-  ```
-  ```sh
-  # Windows
-  https://conda.io/projects/conda/en/latest/user-guide/install/windows.html
-  ```
-* Install the conda environment with all the necessary dependencies, by opening a terminal and running the following commands
-  1. Download [environment.yml](https://raw.githubusercontent.com/gandresr/ptsnet/refs/heads/development/environment.yml)
-  2. Execute `conda activate` to start conda
-  3. Execute `conda env create -f environment.yml`
-  4. Execute `conda activate ptsnet`
-
-<!-- USAGE EXAMPLES -->
 ## Usage
 
-Create a file called named `simulation.py` with the following contents:
+```ts
+import { PtsnetSimulation } from 'ptsnet';
 
-```python
-import matplotlib.pyplot as plt
-from ptsnet.simulation.sim import PTSNETSimulation
-from ptsnet.utils.io import get_example_path
+// `inp` is the text of an EPANET .inp file.
+const sim = await PtsnetSimulation.create({
+  inp: inpFileContents,
+  settings: { duration: 20, timeStep: 0.01 },
+});
 
-sim = PTSNETSimulation(
-  workspace_name = 'TNET3_VALVE',
-  inpfile = get_example_path('TNET3'))
-sim.define_valve_operation('VALVE-179', initial_setting=1, final_setting=0, start_time=1, end_time=2)
-sim.run(); print(sim)
+// Close VALVE-179 linearly between t = 1 s and t = 2 s.
+sim.defineValveOperation('VALVE-179', {
+  initialSetting: 1,
+  finalSetting: 0,
+  startTime: 1,
+  endTime: 2,
+});
 
-plt.plot(sim['time'], sim['node'].head['JUNCTION-73'])
-plt.show()
+sim.run();
+
+// Results are labeled time series (Float64Array, one value per time step).
+const time = sim.time;                                   // time stamps [s]
+const head = sim.results.node.head.get('JUNCTION-73');   // head [m] over time
+const flow = sim.results.pipeStart.flowrate.get('PIPE-1');
 ```
 
-After creating the file, you can execute the code from the command line.
+Reading an `.inp` file in Node:
 
-#### To execute the parallel version of PTSNET it is necessary to have __Linux/Mac__</span>. 
+```ts
+import { readFileSync } from 'node:fs';
+const sim = await PtsnetSimulation.create({ inp: readFileSync('net.inp', 'utf8') });
+```
 
-If you have __Linux/Mac__ execute the following command on the terminal:
+### Operations
+
+```ts
+sim.defineValveOperation(names, { initialSetting, finalSetting, startTime, endTime });
+sim.definePumpOperation(names, { initialSetting, finalSetting, startTime, endTime });
+sim.addBurst(nodeNames, burstCoeff, startTime, endTime);
+sim.addSurgeProtection(nodeName, 'open',   tankArea);
+sim.addSurgeProtection(nodeName, 'closed', tankArea, tankHeight, waterLevel);
+```
+
+### Results
+
+`sim.results` exposes labeled [`ResultSeries`](src/core/results.ts):
+
+| Accessor | Quantity | Rows |
+| --- | --- | --- |
+| `results.node.head` | hydraulic head `[m]` | every node with a representative point |
+| `results.node.leakFlow` / `demandFlow` | emitter / demand flow `[m³/s]` | junction nodes |
+| `results.pipeStart.flowrate` / `pipeEnd.flowrate` | flow at pipe ends `[m³/s]` | every pipe |
+
+```ts
+const series = sim.results.node.head.get('JUNCTION-73'); // Float64Array
+const value  = sim.results.node.head.at('JUNCTION-73', 10); // value at step 10
+const labels = sim.results.node.head.labels;
+```
+
+### Settings
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `duration` | `20` | transient duration `[s]` |
+| `timeStep` | `0.01` | requested time step `[s]` (may be reduced by the wave-speed method) |
+| `defaultWaveSpeed` | `1000` | wave speed `[m/s]` applied to all pipes (`null` to use `waveSpeeds`) |
+| `waveSpeedMethod` | `'optimal'` | `'optimal' \| 'critical' \| 'user' \| 'dt'` |
+| `waveSpeeds` | – | per-pipe wave speeds `{ [pipeLabel]: number }` |
+| `period` | `0` | EPANET extended-period index for the initial conditions |
+| `skipCompatibilityCheck` | `false` | skip the model validation pass |
+
+All physical quantities are SI (m, m³/s, m of head), matching the original.
+
+## Differences from the Python version
+
+The port is faithful to the numerical engine (see parity numbers below). The
+following structural changes were made to fit a JavaScript library:
+
+- **Serial engine.** The Python code parallelizes points across MPI ranks
+  (`mpi4py`). JavaScript has no MPI, so this port runs a single serial engine
+  that owns every point. The kernels operate on plain typed arrays, so the same
+  shape can back a Web Worker / `worker_threads` implementation later.
+- **epanet-js for initial conditions.** The steady-state solve and `.inp`
+  parsing use `epanet-js` (OWA‑EPANET 2.2) instead of `wntr` + the bundled
+  EPANET DLLs.
+- **In-memory results.** Results are labeled typed-array series rather than
+  HDF5 workspaces. Plotting (matplotlib), the HPC/TACC helpers, and the
+  profiler are not ported.
+- **Surge-tank state bug fixed.** In the Python kernels
+  (`funcs.run_open_protections` / `run_closed_protections`) the tank state
+  (`QT`, `HT`, `VA`) was rebound to local variables and **never written back**,
+  so surge tanks did not accumulate state between time steps. This port
+  persists that state, which is the physically intended behaviour. As a result,
+  models that use surge-protection devices will differ from the Python output
+  (by design); everything else matches.
+
+## Python ↔ JavaScript parity
+
+The transient engine is validated against the original Python PTSNET. For an
+apples-to-apples comparison, both sides use OWA‑EPANET 2.2 for the steady state
+(the Python loader is pointed at PTSNET's bundled `libepanet22_amd64.so`; the
+default loader would otherwise pick the older EPANET 2.0 build). The Python
+reference is generated by [`compare/run_python.py`](compare/run_python.py) and
+checked by [`test/parity.test.ts`](test/parity.test.ts).
+
+| Scenario | Network | Steps × points | Max head difference |
+| --- | --- | --- | --- |
+| `simple` | reservoir → pipe → junction (no valves/pumps) | 20 × 42 | **≈1 × 10⁻⁶ m** |
+| `hammer` | rapid inline-valve closure (Joukowsky surge) | 80 × 42 | **7.3 × 10⁻⁴ m** |
+| `tnet3`  | full network: 129 nodes, 168 pipes, 2 pumps, 8 valves; `VALVE-179` closure | 523 × 5098 | **6.3 × 10⁻⁵ m** |
+
+(The committed reference is rounded to 10⁻⁶ m to keep the fixture small; the
+unrounded `simple` agreement is ≈5 × 10⁻⁷ m.)
+
+The `simple` agreement is at the floor set by EPANET's single-precision
+steady-state output, i.e. the core MOC is effectively bit-faithful. Getting the
+valve scenarios to match required reproducing three Python-specific behaviours
+exactly:
+
+- **Float floor-division.** Python's `t // dt` differs from `Math.floor(t/dt)`
+  (e.g. `0.5 // 0.05 === 9` in Python but `Math.floor(0.5/0.05) === 10`). This
+  determines operation step indices; the port replicates CPython's `float.__floordiv__`.
+- **Banker's rounding.** `numpy.round` / `round` round half-to-even when
+  computing pipe segment counts and step totals.
+- **EPS stepping quirk.** `get_initial_conditions` calls `ENnextH()` before the
+  first `ENrunH()`, advancing an extended-period model by one hydraulic step
+  before sampling. The port mirrors this exactly.
+
+The only remaining (sub-0.1 mm) differences come from EPANET's float output and
+a tiny pump-curve least-squares fit difference (`numpy.polyfit` SVD vs. normal
+equations).
+
+Beyond the cross-check, a [Joukowsky surge test](test/waterHammer.test.ts)
+confirms a rapid inline-valve closure produces a head rise of `a·V₀/g` within
+~3 %.
+
+## Development
+
 ```sh
-mpiexec -n 4 python simulation.py
+npm install
+npm test          # vitest (includes the Python-parity check)
+npm run build     # vite library build (ESM + CJS) + .d.ts
+npm run typecheck
 ```
-The number of processors is defined by the parameter `-n` in the command, in this case 4.
 
-If you have __Windows__ you can still run the simulation as shown below, but you will not have access to PTSNET's parallel capabilities:
+### Regenerating the Python reference
+
+The committed `compare/python_results.json` is produced from the original Python
+code (kept in [`ptsnet/`](ptsnet)). It requires a pinned environment because the
+Python code uses removed NumPy aliases (`np.int`/`np.float`) and `mpi4py`:
+
 ```sh
-python simulation.py
+sudo apt-get install -y libopenmpi-dev openmpi-bin   # for mpi4py
+python3 -m venv .venv-py && . .venv-py/bin/activate
+pip install "numpy==1.23.5" "scipy==1.10.1" "pandas==2.0.3" \
+            "matplotlib==3.7.3" "networkx==3.1" mpi4py h5py tqdm \
+            "numba==0.57.1" kneed "wntr==1.1.0"
+python compare/run_python.py
 ```
-For more examples, please refer to the [jupyter notebooks](https://github.com/gandresr/ptsnet/tree/development/publication).
 
-
-
-<!-- ROADMAP -->
-<!-- ## Roadmap -->
-
-<!-- See the [open issues](https://github.com/gandresr/PTSNET/issues) for a list of proposed features (and known issues). -->
-
-
-
-<!-- CONTRIBUTING -->
-<!-- ## Contributing -->
-
-<!-- Contributions are what make the open source community such an amazing place to be learn, inspire, and create. Any contributions you make are **greatly appreciated**. -->
-
-<!-- 1. Fork the Project -->
-<!-- 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`) -->
-<!-- 3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`) -->
-<!-- 4. Push to the Branch (`git push origin feature/AmazingFeature`) -->
-<!-- 5. Open a Pull Request -->
-
+See [`compare/README.md`](compare/README.md) for details.
 
 <!-- Cite Us -->
 ## Cite Us
 
-If the PTSNET package has been useful for your research, please cite the paper below:
+If PTSNET has been useful for your research, please cite:
 
 [PTSNet: A Parallel Transient Simulator for Water Transport Networks based on vectorization and distributed computing](https://www.sciencedirect.com/science/article/pii/S1364815222002547)
+
 ```
 @article{riano2022ptsnet,
   title={PTSNet: A Parallel Transient Simulator for Water Transport Networks based on vectorization and distributed computing},
@@ -176,9 +210,8 @@ If the PTSNET package has been useful for your research, please cite the paper b
 }
 ```
 
-If the PTSNET algorithm was useful for you, please cite the paper below:
-
 [Distributed and Vectorized Method of Characteristics for Fast Transient Simulations in Water Distribution Systems](https://onlinelibrary.wiley.com/doi/full/10.1111/mice.12709)
+
 ```
 @article{riano2022distributed,
   title={Distributed and vectorized method of characteristics for fast transient simulations in water distribution systems},
@@ -189,41 +222,12 @@ If the PTSNET algorithm was useful for you, please cite the paper below:
 }
 ```
 
-<!-- LICENSE -->
 ## License
 
-Distributed under the Unlicense License. See `LICENSE` for more information.
+Distributed under the Unlicense. See `LICENSE.txt`.
 
-
-
-<!-- CONTACT -->
-## Contact
-
-Gerardo Riano - griano@utexas.edu
-
-Lina Sela - linasela@utexas.edu
-
-Project Link: [https://github.com/gandresr/PTSNET](https://github.com/gandresr/PTSNET)
-
-
-
-<!-- ACKNOWLEDGEMENTS -->
 ## Acknowledgements
 
-The authors acknowledge the Texas Advanced Computing Center (TACC) at The University of Texas at Austin for providing HPC resources that have contributed to the research results reported within this publication. This work was supported in part by NSF under award 2015658 and Cooperative Agreement No. 83595001 awarded by the U.S. Environmental Protection Agency to The University of Texas at Austin. It has not been formally reviewed by EPA. The views expressed in this presentation are solely those of the authors, and do not necessarily reflect those of the Agency. EPA does not endorse any products or commercial services mentioned in this publication.
-
-
-<!-- MARKDOWN LINKS & IMAGES -->
-<!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
-[contributors-shield]: https://img.shields.io/github/contributors/gandresr/repo.svg?style=for-the-badge
-[contributors-url]: https://github.com/gandresr/repo/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/gandresr/repo.svg?style=for-the-badge
-[forks-url]: https://github.com/gandresr/repo/network/members
-[stars-shield]: https://img.shields.io/github/stars/gandresr/repo.svg?style=for-the-badge
-[stars-url]: https://github.com/gandresr/repo/stargazers
-[issues-shield]: https://img.shields.io/github/issues/gandresr/repo.svg?style=for-the-badge
-[issues-url]: https://github.com/gandresr/PTSNET/issues
-[license-shield]: https://img.shields.io/github/license/gandresr/repo.svg?style=for-the-badge
-[license-url]: https://github.com/gandresr/repo/blob/master/LICENSE.txt
-[linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
-[linkedin-url]: https://linkedin.com/in/gandresr
+Original PTSNET by Gerardo Riaño-Briceño and Lina Sela (UT Austin). The authors
+acknowledge the Texas Advanced Computing Center (TACC). This work was supported
+in part by NSF award 2015658 and EPA Cooperative Agreement No. 83595001.
