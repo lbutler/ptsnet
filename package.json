@@ -23,7 +23,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "bench": "tsx bench/run.ts"
+    "bench": "tsx bench/run.ts",
+    "demo": "vite examples/browser"
   },
   "keywords": [
     "water",
