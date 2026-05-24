@@ -5,6 +5,7 @@
 import { G } from './types';
 import { EngineModel } from './serialModel';
 import { sign, newton } from './math';
+import type { CavState } from './boundaryPhase';
 
 /**
  * Interior MOC stencil for the inline (single-worker) path. Must stay in sync
@@ -121,6 +122,7 @@ export function runGeneralJunction(
   sc: Float64Array,
   sb: Float64Array,
   HH: Float64Array,
+  cav?: CavState,
 ): void {
   const { jipDboundaries, jipUboundaries, jipPoints, jipNodeOfPoint, ajip, numJip } = m;
 
@@ -145,12 +147,36 @@ export function runGeneralJunction(
   }
 
   for (let c = 0; c < numJip; c++) {
-    const X = sc[c] / sb[c];
     const i = ajip[c];
-    let K = ((Ke[i] + Kd[i]) / sb[c]) ** 2;
-    const HZ = X - Z[i];
-    if (HZ < 0) K = 0;
-    HH[c] = (2 * X + K - Math.sqrt(K * K + 4 * K * HZ)) / 2;
+    if (cav) {
+      // DGCM at the junction node: a gas cavity (∀ = C3/(H − Hgas)) absorbs the
+      // flow imbalance, so head clamps near vapor instead of going below it.
+      // Leak/demand are taken explicitly from the previous head (and vanish once
+      // head drops below the node elevation, i.e. during cavitation).
+      const ld = (Ke[i] + Kd[i]) * Math.sqrt(Math.max(0, cav.prevHeadJ[c] - Z[i]));
+      const P = cav.dt * cav.psi * sb[c];
+      const Qc =
+        cav.gasVolJ[c] -
+        cav.dt * cav.psi * sc[c] +
+        cav.dt * cav.psi * ld +
+        cav.dt * (1 - cav.psi) * cav.prevNetJ[c];
+      const Hg = cav.HgasJ[c];
+      let disc = (Qc - P * Hg) ** 2 - 4 * P * (-Qc * Hg - cav.C3J[c]);
+      if (disc < 0) disc = 0;
+      const H = (-(Qc - P * Hg) + Math.sqrt(disc)) / (2 * P);
+      HH[c] = H;
+      let vol = P * H + Qc;
+      if (vol < 0) vol = 0;
+      cav.gasVolJ[c] = vol;
+      cav.prevNetJ[c] = H * sb[c] - sc[c] + ld;
+      cav.prevHeadJ[c] = H;
+    } else {
+      const X = sc[c] / sb[c];
+      let K = ((Ke[i] + Kd[i]) / sb[c]) ** 2;
+      const HZ = X - Z[i];
+      if (HZ < 0) K = 0;
+      HH[c] = (2 * X + K - Math.sqrt(K * K + 4 * K * HZ)) / 2;
+    }
   }
 
   for (let idx = 0; idx < jipPoints.length; idx++) {

@@ -146,3 +146,77 @@ describe('column separation does not disturb a steady (non-cavitating) run', () 
     expect(hi - lo).toBeLessThan(0.05); // stays at steady state
   });
 });
+
+describe('column separation at junction nodes (DGCM)', () => {
+  // R1 -> P1 -> J1 (high-point junction) -> P2 -> V1 -> J2 (demand). A rapid
+  // valve closure drives the elevated junction J1 below its vapor pressure.
+  const INP = `[TITLE]
+[JUNCTIONS]
+ J1 18 0
+ JV 0 0
+ J2 0 6
+[RESERVOIRS]
+ R1 30
+[PIPES]
+ P1 R1 J1 150 100 130 0 Open
+ P2 J1 JV 150 100 130 0 Open
+[VALVES]
+ V1 JV J2 100 TCV 5 0
+[OPTIONS]
+ Units LPS
+ Headloss H-W
+[TIMES]
+ Duration 0
+[END]
+`;
+  const settings = { duration: 1.2, timeStep: 0.001, defaultWaveSpeed: 1200, waveSpeedMethod: 'user' as const };
+  const vaporJ1 = 18 + (0.24 - 10.33); // junction elevation + (Hv − Hb) ≈ 7.91 m
+
+  it('clamps an elevated junction at its vapor head and forms a cavity there', async () => {
+    const sim = await PtsnetSimulation.create({
+      inp: INP,
+      settings,
+      cavitation: true,
+      recording: { nodes: ['J1'] },
+    });
+    const steady = sim.ss.node.head[sim.ss.node.index.get('J1')!];
+    sim.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.1, endTime: 0.12 });
+    sim.run();
+
+    const h = sim.results.node.head.get('J1');
+    expect(h.every(Number.isFinite)).toBe(true);
+
+    let min = Infinity;
+    let max = -Infinity;
+    for (const v of h) {
+      min = Math.min(min, v);
+      max = Math.max(max, v);
+    }
+    // The junction reaches and clamps at its own vapor head (set by its elevation).
+    expect(min).toBeGreaterThan(vaporJ1 - 1);
+    expect(min).toBeLessThan(vaporJ1 + 1);
+
+    // A real, sustained cavity at the node (not an isolated single-step touch).
+    let plateau = 0;
+    let longest = 0;
+    for (const v of h) {
+      if (Math.abs(v - vaporJ1) < 0.5) plateau++;
+      else plateau = 0;
+      longest = Math.max(longest, plateau);
+    }
+    expect(longest).toBeGreaterThan(50);
+    expect(sim.maxCavityVolume!).toBeGreaterThan(1e-6);
+
+    // Cavity collapse drives a pressure pulse well above the steady head.
+    expect(max).toBeGreaterThan(steady + 1);
+  });
+
+  it('the basic engine (no cavitation) goes unphysical on the same case', async () => {
+    const sim = await PtsnetSimulation.create({ inp: INP, settings, recording: { nodes: ['J1'] } });
+    sim.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.1, endTime: 0.12 });
+    sim.run();
+    const h = sim.results.node.head.get('J1');
+    const broken = !h.every(Number.isFinite) || Math.min(...h) < vaporJ1 - 5;
+    expect(broken).toBe(true);
+  });
+});

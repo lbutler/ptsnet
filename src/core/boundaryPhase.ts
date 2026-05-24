@@ -46,6 +46,13 @@ export interface CavState {
   C3: Float64Array; // gas-law constant per point
   syncPoints: Int32Array; // boundary points whose qu must mirror qd
   psi: number;
+  dt: number;
+  // Per-jip-node gas state (junction-node cavities).
+  gasVolJ: Float64Array; // persistent gas/cavity volume per junction node
+  HgasJ: Float64Array; // vapor-clamp head per junction node
+  C3J: Float64Array; // gas-law constant per junction node
+  prevNetJ: Float64Array; // previous net outflow per junction node (for the 1-ψ term)
+  prevHeadJ: Float64Array; // previous head per junction node (explicit leak/demand)
 }
 
 /** Gas cavity at single/end valves (valve discharge taken explicitly from the previous head). */
@@ -163,6 +170,7 @@ export function runBoundaryPhase(
       st.jSc,
       st.jSb,
       st.jHH,
+      cav,
     );
   }
 

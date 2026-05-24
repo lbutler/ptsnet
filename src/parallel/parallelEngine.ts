@@ -163,6 +163,12 @@ export class ParallelEngine {
   private readonly Hgas?: Float64Array;
   private readonly C3?: Float64Array;
   private readonly syncPoints?: Int32Array;
+  // Per-jip-node gas state (junction-node cavities).
+  private readonly gasVolJ?: Float64Array;
+  private readonly HgasJ?: Float64Array;
+  private readonly C3J?: Float64Array;
+  private readonly prevNetJ?: Float64Array;
+  private readonly prevHeadJ?: Float64Array;
   private readonly psi: number;
   /** Largest gas-cavity volume [m³] seen during the run (cavitation only). */
   maxCavityVolume?: number;
@@ -240,6 +246,13 @@ export class ParallelEngine {
       this.C3 = C3.arr;
       this.maxCavityVolume = 0;
       this.initGasState(qu.arr, gasVol.arr, Hgas.arr, C3.arr, isInt.arr, cavitation);
+      const nj = model.numJip;
+      this.gasVolJ = new Float64Array(nj);
+      this.HgasJ = new Float64Array(nj);
+      this.C3J = new Float64Array(nj);
+      this.prevNetJ = new Float64Array(nj);
+      this.prevHeadJ = new Float64Array(nj);
+      this.initJunctionGasState(cavitation);
       this.syncPoints = this.buildSyncPoints();
       Object.assign(shared, {
         quSab: qu.sab,
@@ -324,6 +337,38 @@ export class ParallelEngine {
     }
   }
 
+  /** Initialize DGCM per-junction-node gas state (vapor-clamp head, reference volume, gas constant). */
+  private initJunctionGasState(opts: CavitationOptions): void {
+    const { model, ss } = this;
+    const alpha = opts.voidFraction ?? 1e-7;
+    const vaporGauge = (opts.vaporHead ?? 0.24) - (opts.barometricHead ?? 10.33);
+
+    // Map each jip boundary point to its node, then sum a half-cell reference
+    // volume from every connected pipe.
+    const pointToJip = new Int32Array(this.n).fill(-1);
+    for (let idx = 0; idx < model.jipPoints.length; idx++) {
+      pointToJip[model.jipPoints[idx]] = model.jipNodeOfPoint[idx];
+    }
+    const vol0 = new Float64Array(model.numJip);
+    for (let p = 0; p < ss.pipe.n; p++) {
+      const contrib = (alpha * ss.pipe.area[p] * ss.pipe.dx[p]) / 2;
+      const cd = pointToJip[model.dboundary[p]];
+      const cu = pointToJip[model.uboundary[p]];
+      if (cd >= 0) vol0[cd] += contrib;
+      if (cu >= 0) vol0[cu] += contrib;
+    }
+
+    for (let c = 0; c < model.numJip; c++) {
+      const i = model.ajip[c];
+      const steady = ss.node.head[i];
+      this.HgasJ![c] = ss.node.elevation[i] + vaporGauge;
+      this.C3J![c] = (steady - this.HgasJ![c]) * vol0[c];
+      this.gasVolJ![c] = vol0[c];
+      this.prevHeadJ![c] = steady;
+      this.prevNetJ![c] = 0;
+    }
+  }
+
   /** Boundary points whose qu face must be mirrored from qd each step (all but interior + single valves). */
   private buildSyncPoints(): Int32Array {
     const { model } = this;
@@ -372,6 +417,12 @@ export class ParallelEngine {
         C3: this.C3!,
         syncPoints: this.syncPoints!,
         psi: this.psi,
+        dt: this.timeStep,
+        gasVolJ: this.gasVolJ!,
+        HgasJ: this.HgasJ!,
+        C3J: this.C3J!,
+        prevNetJ: this.prevNetJ!,
+        prevHeadJ: this.prevHeadJ!,
       };
     }
     runBoundaryPhase(
@@ -394,6 +445,8 @@ export class ParallelEngine {
       const gasVol = this.gasVol!;
       let max = this.maxCavityVolume!;
       for (let i = 0; i < n; i++) if (gasVol[i] > max) max = gasVol[i];
+      const gj = this.gasVolJ!;
+      for (let c = 0; c < gj.length; c++) if (gj[c] > max) max = gj[c];
       this.maxCavityVolume = max;
     }
   }
