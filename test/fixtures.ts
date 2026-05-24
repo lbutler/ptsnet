@@ -6,7 +6,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 export function exampleInp(name: string): string {
   const file = name.toLowerCase().endsWith('.inp') ? name : `${name}.inp`;
-  return readFileSync(resolve(here, '..', 'ptsnet', 'examples', file), 'utf8');
+  return readFileSync(resolve(here, '..', 'examples', file), 'utf8');
 }
 
 /**

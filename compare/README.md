@@ -17,21 +17,35 @@ Python installed. The parity test skips automatically if the file is absent.
 
 ## Scenarios
 
-| Name | Description |
+17 scenarios exercise every engine code path:
+
+| Name | Exercises |
 | --- | --- |
-| `simple` | reservoir → pipe → junction (demand). No valves/pumps — exercises only the interior + junction MOC kernels. |
-| `hammer` | reservoir → pipe → inline valve → pipe → reservoir, with a rapid valve closure (Joukowsky surge). |
-| `tnet3`  | the bundled `TNET3` network (129 nodes, 168 pipes, 2 pumps, 8 valves) with `VALVE-179` closing, using the adaptive `optimal` time step. |
+| `simple` | interior + junction kernels (no valves/pumps) |
+| `hammer` | inline valve closure (Joukowsky surge) |
+| `tnet3` | full network (129 nodes, 2 pumps, 8 valves), `optimal` time step, valve closure |
+| `tnet3_pump` | inline pump trip |
+| `tnet3_burst` | emitter (burst) growth |
+| `simple_demand` | scheduled demand change |
+| `hammer_custom` | arbitrary (non-linear) valve schedule |
+| `single_pump` | reservoir → pump → pipe (single-pump branch) |
+| `single_valve` | pipe → end valve → demand (single-valve branch) |
+| `surge_open` / `surge_closed` | open / closed surge tanks (vs. corrected kernels) |
+| `crit_critical` / `crit_dt` | `critical` / `dt` segmentation (max_dt reduction) |
+| `loop`, `b0`, `b0_0`, `pipe_series` | extra topologies (steady state) |
 
 ## Results
 
-Maximum absolute head difference between Python and TypeScript:
+All scenarios agree to EPANET single-precision level. Representative maximum
+absolute head differences:
 
 | Scenario | Steps × points | Max head diff |
 | --- | --- | --- |
 | `simple` | 20 × 42 | 5.3 × 10⁻⁷ m |
 | `hammer` | 80 × 42 | 7.3 × 10⁻⁴ m |
 | `tnet3`  | 523 × 5098 | 6.3 × 10⁻⁵ m |
+| `single_pump` / `single_valve` | 40 × 21 | < 4 × 10⁻⁶ m |
+| `surge_open` / `surge_closed` | 60 × 42 | 1.4 × 10⁻⁶ m |
 
 `simple` agrees to the precision of EPANET's single-precision steady-state
 output, i.e. the core engine is effectively bit-faithful.
@@ -47,10 +61,16 @@ several metres (purely from the 2.0-vs-2.2 steady state, not the transient).
 
 ## Regenerating `python_results.json`
 
-The Python code needs a pinned environment (it uses removed NumPy aliases
-`np.int` / `np.float`, and `mpi4py`):
+The original Python PTSNET has been removed from the working tree now that the
+port is at parity, but it remains in git history. `run_python.py` is kept as a
+record of how the reference was produced. To regenerate, restore the Python code
+and set up the pinned environment (it uses removed NumPy aliases `np.int` /
+`np.float`, and `mpi4py`):
 
 ```sh
+# Restore the original Python package from history.
+git checkout <pre-removal-commit> -- ptsnet
+
 sudo apt-get install -y libopenmpi-dev openmpi-bin
 python3 -m venv ../.venv-py && . ../.venv-py/bin/activate
 pip install "numpy==1.23.5" "scipy==1.10.1" "pandas==2.0.3" \
@@ -59,5 +79,5 @@ pip install "numpy==1.23.5" "scipy==1.10.1" "pandas==2.0.3" \
 python run_python.py
 ```
 
-`wntr` is used only for `.inp` parsing/topology in the Python code; its EPANET
-build is not used (PTSNET uses its own bundled library for the hydraulic solve).
+`wntr` was used only for `.inp` parsing/topology in the Python code; its EPANET
+build was not used (PTSNET used its own bundled library for the hydraulic solve).

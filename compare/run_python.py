@@ -60,7 +60,7 @@ _wk.run_open_protections = _run_open_protections_fixed
 _wk.run_closed_protections = _run_closed_protections_fixed
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-EXAMPLES = os.path.join(os.path.dirname(HERE), 'ptsnet', 'examples')
+EXAMPLES = os.path.join(os.path.dirname(HERE), 'examples')
 
 SIMPLE_INP = """[TITLE]
 [JUNCTIONS]
