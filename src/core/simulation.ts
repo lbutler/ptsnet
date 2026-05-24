@@ -127,6 +127,22 @@ export interface SimulationCreateOptions {
   parallel?: { workers?: number };
 }
 
+/** Streaming / progress / cancellation options for {@link PtsnetSimulation.run}. */
+export interface RunOptions {
+  /** Abort the run; partial results remain accessible on `sim.results`. */
+  signal?: AbortSignal;
+  /** Called after each computed step with the just-finished step index. */
+  onStep?: (step: number) => void;
+  /** Periodic progress callback. */
+  onProgress?: (p: { step: number; totalSteps: number; fraction: number }) => void;
+  /** Steps between `onProgress` calls (default ≈ totalSteps/100). */
+  progressInterval?: number;
+}
+
+function abortError(signal?: AbortSignal): unknown {
+  return signal?.reason ?? new DOMException('The simulation was aborted.', 'AbortError');
+}
+
 /** Common surface of the serial and parallel engines. */
 interface Engine {
   runStep(t: number): void;
@@ -592,27 +608,59 @@ export class PtsnetSimulation {
     this.t++;
   }
 
+  private progressInterval(options: RunOptions): number {
+    return options.progressInterval ?? Math.max(1, Math.floor(this.settings.timeSteps / 100));
+  }
+
+  private afterStep(options: RunOptions, interval: number): void {
+    const step = this.t - 1; // step just computed
+    options.onStep?.(step);
+    if (options.onProgress && (this.t % interval === 0 || this.isOver)) {
+      const total = this.settings.timeSteps;
+      options.onProgress({ step, totalSteps: total, fraction: Math.min(1, this.t / total) });
+    }
+    if (options.signal?.aborted) {
+      this.dispose();
+      throw abortError(options.signal);
+    }
+  }
+
   /**
    * Run the full transient simulation synchronously. Disposes the worker pool
    * (if any) when done. In the browser, parallel runs must use {@link runAsync}
    * because the main thread cannot block on `Atomics.wait`.
+   *
+   * Optional callbacks stream progress (`onProgress`) and per-step events
+   * (`onStep`); an `AbortSignal` cancels the run (partial results remain in
+   * `sim.results`).
    */
-  run(): void {
+  run(options: RunOptions = {}): void {
     if (this.parallelConfig && typeof window !== 'undefined') {
       throw new Error('In the browser, parallel simulations must use `await sim.runAsync()`.');
     }
+    if (options.signal?.aborted) throw abortError(options.signal);
     if (!this.initialized) this.initialize();
-    while (!this.isOver) this.runStep();
+    const interval = this.progressInterval(options);
+    while (!this.isOver) {
+      this.runStep();
+      this.afterStep(options, interval);
+    }
     this.dispose();
   }
 
   /**
    * Run the full transient simulation without blocking the calling thread
    * (uses `Atomics.waitAsync` for parallel runs). Works in the browser and Node.
+   * Accepts the same streaming/progress/cancellation options as {@link run}.
    */
-  async runAsync(): Promise<void> {
+  async runAsync(options: RunOptions = {}): Promise<void> {
+    if (options.signal?.aborted) throw abortError(options.signal);
     if (!this.initialized) this.initialize();
-    while (!this.isOver) await this.runStepAsync();
+    const interval = this.progressInterval(options);
+    while (!this.isOver) {
+      await this.runStepAsync();
+      this.afterStep(options, interval);
+    }
     this.dispose();
   }
 
