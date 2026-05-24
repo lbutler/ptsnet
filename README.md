@@ -75,6 +75,7 @@ sim.definePumpOperation(names, { initialSetting, finalSetting, startTime, endTim
 sim.addBurst(nodeNames, burstCoeff, startTime, endTime);
 sim.addSurgeProtection(nodeName, 'open',   tankArea);
 sim.addSurgeProtection(nodeName, 'closed', tankArea, tankHeight, waterLevel);
+sim.addCheckValve(nodeName); // passes forward flow, shuts on reversal (no backflow)
 ```
 
 ### Results

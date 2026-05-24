@@ -64,6 +64,9 @@ export interface EngineModel {
   closedHeight: Float64Array;
   closedWaterLevel: Float64Array;
   closedNode: Int32Array;
+  // Check valves (point pairs; start has C+ / upstream pipe, end has C- / downstream pipe).
+  checkStart: Int32Array;
+  checkEnd: Int32Array;
 }
 
 interface BoundaryRef {
@@ -308,6 +311,19 @@ export function buildEngineModel(ss: SteadyState, numPoints: number): EngineMode
     }
   }
 
+  // --- Check valves (degree-2 node between two pipes; passes flow u -> d). ---
+  const checkStart: number[] = [];
+  const checkEnd: number[] = [];
+  for (const cv of ss.checkValve.values()) {
+    const refs = boundaryAtNode[cv.node];
+    const u = refs.find((r) => r.isU);
+    const d = refs.find((r) => !r.isU);
+    if (u && d) {
+      checkStart.push(u.point);
+      checkEnd.push(d.point);
+    }
+  }
+
   return {
     numPoints,
     B,
@@ -349,5 +365,7 @@ export function buildEngineModel(ss: SteadyState, numPoints: number): EngineMode
     closedHeight: Float64Array.from(closedHeight),
     closedWaterLevel: Float64Array.from(closedWaterLevel),
     closedNode: Int32Array.from(closedNode),
+    checkStart: Int32Array.from(checkStart),
+    checkEnd: Int32Array.from(checkEnd),
   };
 }

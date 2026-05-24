@@ -208,6 +208,34 @@ export function runGeneralJunction(
   }
 }
 
+/**
+ * Ideal check valves at degree-2 nodes. Runs after {@link runGeneralJunction},
+ * which already solves the node as a transparent series junction (the open-valve
+ * case) and normalizes the boundary characteristics. If the through-flow has
+ * reversed (`Q1[start] < 0`), the valve shuts: flow is zeroed and each side
+ * reflects as a dead end (`H = Cp/Bp` upstream, `H = Cm/Bm` downstream).
+ */
+export function runCheckValves(
+  Q1: Float64Array,
+  H1: Float64Array,
+  Cp: Float64Array,
+  Bp: Float64Array,
+  Cm: Float64Array,
+  Bm: Float64Array,
+  m: EngineModel,
+): void {
+  for (let i = 0; i < m.checkStart.length; i++) {
+    const s = m.checkStart[i];
+    const e = m.checkEnd[i];
+    if (Q1[s] < 0) {
+      Q1[s] = 0;
+      Q1[e] = 0;
+      H1[s] = Cp[s] / Bp[s];
+      H1[e] = Cm[e] / Bm[e];
+    }
+  }
+}
+
 /** Solve valve boundary points (single/end valves and inline valves). */
 export function runValveStep(
   Q1: Float64Array,

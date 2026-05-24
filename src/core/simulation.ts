@@ -406,6 +406,34 @@ export class PtsnetSimulation {
     }
   }
 
+  /**
+   * Install an (ideal) check valve at a node sitting between two pipes. It passes
+   * flow in the steady-state direction and shuts the instant flow reverses,
+   * preventing backflow (e.g. on the down-surge after a downstream valve closure
+   * or, later, a pump trip).
+   */
+  addCheckValve(nodeName: string): void {
+    const node = this.ss.node;
+    const nodeId = node.index.get(nodeName);
+    if (nodeId === undefined) throw new Error(`unknown node '${nodeName}'`);
+    if (this.ss.checkValve.has(nodeName)) {
+      throw new Error(`node '${nodeName}' already has a check valve`);
+    }
+    if (this.ss.openProtection.has(nodeName) || this.ss.closedProtection.has(nodeName)) {
+      throw new Error(`node '${nodeName}' already has a surge protection`);
+    }
+    const onNonPipe = [
+      ...this.ss.pump.startNode,
+      ...this.ss.pump.endNode,
+      ...this.ss.valve.startNode,
+      ...this.ss.valve.endNode,
+    ].includes(nodeId);
+    if (node.degree[nodeId] !== 2 || onNonPipe) {
+      throw new Error(`node '${nodeName}' is not between two pipes`);
+    }
+    this.ss.checkValve.set(nodeName, { label: nodeName, node: nodeId });
+  }
+
   // --- Custom setting schedules (arbitrary time/value profiles) ---
 
   private toF64(a: number[] | Float64Array): Float64Array {

@@ -10,6 +10,7 @@ import { EngineModel } from './serialModel';
 import { Recorder } from './recorder';
 import {
   runGeneralJunction,
+  runCheckValves,
   runValveStep,
   runPumpStep,
   runOpenProtections,
@@ -173,6 +174,7 @@ export function runBoundaryPhase(
       cav,
     );
   }
+  if (model.checkStart.length > 0) runCheckValves(Q1, H1, Cp, Bp, Cm, Bm, model);
 
   runValveStep(Q1, H1, Cp, Bp, Cm, Bm, ss.valve.setting, ss.valve.K, ss.valve.area, model);
   if (cav) applyValveGasCavities(ss, model, timeStep, cav, H0, Q1, H1, Cp, Bp);
