@@ -209,6 +209,15 @@ describe('column separation at junction nodes (DGCM)', () => {
 
     // Cavity collapse drives a pressure pulse well above the steady head.
     expect(max).toBeGreaterThan(steady + 1);
+
+    // The per-element report names the cavitating junction and stays valid.
+    const report = sim.cavitationReport()!;
+    expect(report.valid).toBe(true);
+    expect(report.worstFillFraction).toBeLessThan(1);
+    const j1 = report.nodes.find((nd) => nd.label === 'J1');
+    expect(j1).toBeDefined();
+    expect(j1!.maxVolume).toBeGreaterThan(1e-6);
+    expect(j1!.fillFraction).toBeGreaterThan(0);
   });
 
   it('the basic engine (no cavitation) goes unphysical on the same case', async () => {
@@ -218,5 +227,38 @@ describe('column separation at junction nodes (DGCM)', () => {
     const h = sim.results.node.head.get('J1');
     const broken = !h.every(Number.isFinite) || Math.min(...h) < vaporJ1 - 5;
     expect(broken).toBe(true);
+  });
+});
+
+describe('cavitation diagnostics (per-element report)', () => {
+  it('reports per-element peak cavity volumes for the Bergant case', async () => {
+    const sim = await PtsnetSimulation.create({
+      inp: BERGANT_INP,
+      settings,
+      cavitation: true,
+      recording: { nodes: 'none', pipes: 'none' },
+    });
+    sim.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.05, endTime: 0.06 });
+    sim.run();
+
+    const report = sim.cavitationReport()!;
+    expect(report).toBeDefined();
+    expect(report.valid).toBe(true);
+    expect(report.worstFillFraction).toBeLessThan(1);
+    expect(report.maxVolume).toBe(sim.maxCavityVolume); // same global peak
+    // The end valve (J1) and its pipe (P1) both cavitate.
+    expect(report.nodes.some((nd) => nd.label === 'J1')).toBe(true);
+    expect(report.pipes.some((p) => p.label === 'P1')).toBe(true);
+    for (const e of [...report.nodes, ...report.pipes]) {
+      expect(e.maxVolume).toBeGreaterThan(0);
+      expect(e.fillFraction).toBeGreaterThan(0);
+      expect(e.fillFraction).toBeLessThanOrEqual(report.worstFillFraction);
+    }
+  });
+
+  it('returns undefined when cavitation is not enabled', async () => {
+    const sim = await PtsnetSimulation.create({ inp: BERGANT_INP, settings, recording: { nodes: 'none', pipes: 'none' } });
+    sim.run();
+    expect(sim.cavitationReport()).toBeUndefined();
   });
 });

@@ -83,6 +83,32 @@ export interface Envelope {
   };
 }
 
+/** One cavitating site's peak cavity volume and how much of its mesh cell it filled. */
+export interface CavityElementReport {
+  label: string;
+  /** Largest vapor-cavity volume reached at this element over the run [m³]. */
+  maxVolume: number;
+  /** maxVolume / segment volume (A·Δx). ≥ 1 means the cavity filled a mesh cell. */
+  fillFraction: number;
+}
+
+/**
+ * Column-separation diagnostics (HAMMER records per-point peak volumes but never
+ * warns when a pocket outgrows its mesh cell — `valid` closes that gap).
+ */
+export interface CavitationReport {
+  /** Largest vapor-cavity volume anywhere over the run [m³]. */
+  maxVolume: number;
+  /** False if any site's cavity reached its mesh-cell volume (discrete-cavity assumption broke down). */
+  valid: boolean;
+  /** Largest fillFraction across all sites. */
+  worstFillFraction: number;
+  /** Pipes that cavitated (peak over interior points). */
+  pipes: CavityElementReport[];
+  /** Nodes that cavitated (junctions and single/end valves). */
+  nodes: CavityElementReport[];
+}
+
 // --- Serialization (JSON-safe; replaces the Python HDF5 workspaces) ---
 
 export interface SerializedSeries {
