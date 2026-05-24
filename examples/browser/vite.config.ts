@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite';
 
 // Cross-origin isolation is required for SharedArrayBuffer (and therefore the
-// parallel engine) in the browser. Without these headers the demo still works,
-// but `create({ parallel })` transparently falls back to the serial engine.
+// engine) in the browser. Without these headers `create()` throws — there is no
+// serial fallback.
 export default defineConfig({
   server: {
     headers: {

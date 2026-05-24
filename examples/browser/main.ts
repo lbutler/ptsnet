@@ -46,7 +46,7 @@ async function main(): Promise<void> {
     recording: { nodes: ['JUNCTION-73'], pipes: 'none', envelope: true },
     parallel: { workers: navigator.hardwareConcurrency },
   });
-  log(`isParallel: ${sim.isParallel} (workers up to ${navigator.hardwareConcurrency})`);
+  log(`workers up to ${navigator.hardwareConcurrency}`);
   log(`points=${sim.numPoints} steps=${sim.settings.timeSteps}`);
 
   sim.defineValveOperation('VALVE-179', { initialSetting: 1, finalSetting: 0, startTime: 1, endTime: 2 });

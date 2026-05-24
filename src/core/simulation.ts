@@ -7,10 +7,9 @@ import { SteadyState, ResolvedSettings, PtsnetSettingsInput, COEFF_TOL } from '.
 import { loadInitialConditions } from '../epanet/initialConditions';
 import { discretize } from './discretize';
 import { buildEngineModel, EngineModel } from './serialModel';
-import { SerialEngine } from './engine';
 import { ParallelEngine } from '../parallel/parallelEngine';
 import { resolveBackend, WorkerBackend } from '../parallel/workerBackend';
-import { CavitationEngine, CavitationOptions } from './cavitationEngine';
+import { CavitationOptions } from './boundaryPhase';
 import { checkCompatibility } from './validation';
 import { cubicSpline, linspace, roundHalfEven, pyFloorDiv } from './math';
 import {
@@ -122,13 +121,13 @@ export interface SimulationCreateOptions {
   /** What to store. Defaults to every element at every step. */
   recording?: RecordingOptions;
   /**
-   * Run the transient on a Node `worker_threads` pool (helps large networks).
-   * Omit for the serial engine. `workers` defaults to the hardware concurrency.
+   * Worker-pool size for the transient (the engine always runs on workers).
+   * `workers` defaults to the hardware concurrency.
    */
   parallel?: { workers?: number };
   /**
-   * Enable column separation (Discrete Vapor Cavity Model) so head cannot drop
-   * below the liquid vapor pressure. `true` uses defaults. Runs serially.
+   * Enable column separation (Discrete Gas Cavity Model) so head cannot drop
+   * below the liquid vapor pressure. `true` uses defaults.
    */
   cavitation?: boolean | CavitationOptions;
 }
@@ -147,16 +146,6 @@ export interface RunOptions {
 
 function abortError(signal?: AbortSignal): unknown {
   return signal?.reason ?? new DOMException('The simulation was aborted.', 'AbortError');
-}
-
-/** Common surface of the serial and parallel engines. */
-interface Engine {
-  runStep(t: number): void;
-  runStepAsync?(t: number): Promise<void>;
-  readonly results: SimulationResults;
-  readonly envelope: Envelope | undefined;
-  readonly time: Float64Array;
-  dispose?(): void;
 }
 
 export interface ValveOperationOptions {
@@ -203,8 +192,9 @@ export class PtsnetSimulation {
   private readonly curves = new Map<string, PtsnetCurve>();
   private readonly elementSettings: Record<SettingType, ElementSettings>;
   private model?: EngineModel;
-  private engine?: Engine;
-  private parallelConfig?: { backend: WorkerBackend; workers: number };
+  private engine?: ParallelEngine;
+  private workerBackend!: WorkerBackend;
+  private workers = 1;
   private cavitationOptions?: CavitationOptions;
   private t = 0;
   private initialized = false;
@@ -231,31 +221,21 @@ export class PtsnetSimulation {
     const ss = await loadInitialConditions(options.inp, { period: settings.period });
     if (!settings.skipCompatibilityCheck) checkCompatibility(ss);
     const sim = new PtsnetSimulation(ss, settings, options.recording ?? {});
+    const backend = await resolveBackend();
+    if (!backend) {
+      throw new Error(
+        'ptsnet requires SharedArrayBuffer-backed workers (Node `worker_threads`, or a ' +
+          'cross-origin-isolated browser context with COOP/COEP headers).',
+      );
+    }
+    const hw = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
+      ?.hardwareConcurrency;
+    sim.workerBackend = backend;
+    sim.workers = options.parallel?.workers ?? hw ?? 4;
     if (options.cavitation) {
       sim.cavitationOptions = options.cavitation === true ? {} : options.cavitation;
-      if (options.parallel) {
-        console.warn('ptsnet: column separation runs serially; ignoring the `parallel` option.');
-      }
-    } else if (options.parallel) {
-      const backend = await resolveBackend();
-      if (backend) {
-        const hw = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
-          ?.hardwareConcurrency;
-        sim.parallelConfig = { backend, workers: options.parallel.workers ?? hw ?? 4 };
-      } else {
-        // SharedArrayBuffer unavailable (e.g. a page without cross-origin
-        // isolation): fall back to the serial engine.
-        console.warn(
-          'ptsnet: parallel execution requires SharedArrayBuffer (cross-origin isolation in the browser); running serially.',
-        );
-      }
     }
     return sim;
-  }
-
-  /** Whether the transient will run on a worker pool (false if it fell back to serial). */
-  get isParallel(): boolean {
-    return this.parallelConfig !== undefined;
   }
 
   /** Recorded time stamps [s] (one per stored sample; honours `recording.every`). */
@@ -519,34 +499,16 @@ export class PtsnetSimulation {
     }
 
     this.model = buildEngineModel(this.ss, this.numPoints);
-    if (this.cavitationOptions) {
-      this.engine = new CavitationEngine(
-        this.ss,
-        this.model,
-        this.settings.timeStep,
-        this.settings.timeSteps,
-        this.recording,
-        this.cavitationOptions,
-      );
-    } else if (this.parallelConfig) {
-      this.engine = new ParallelEngine(
-        this.parallelConfig.backend,
-        this.parallelConfig.workers,
-        this.ss,
-        this.model,
-        this.settings.timeStep,
-        this.settings.timeSteps,
-        this.recording,
-      );
-    } else {
-      this.engine = new SerialEngine(
-        this.ss,
-        this.model,
-        this.settings.timeStep,
-        this.settings.timeSteps,
-        this.recording,
-      );
-    }
+    this.engine = new ParallelEngine(
+      this.workerBackend,
+      this.workers,
+      this.ss,
+      this.model,
+      this.settings.timeStep,
+      this.settings.timeSteps,
+      this.recording,
+      this.cavitationOptions,
+    );
     this.t = 1;
     this.initialized = true;
   }
@@ -656,8 +618,8 @@ export class PtsnetSimulation {
    * `sim.results`).
    */
   run(options: RunOptions = {}): void {
-    if (this.parallelConfig && typeof window !== 'undefined') {
-      throw new Error('In the browser, parallel simulations must use `await sim.runAsync()`.');
+    if (typeof window !== 'undefined') {
+      throw new Error('In the browser, simulations must use `await sim.runAsync()`.');
     }
     if (options.signal?.aborted) throw abortError(options.signal);
     if (!this.initialized) this.initialize();
@@ -705,7 +667,7 @@ export class PtsnetSimulation {
 
   /** Largest vapor-cavity volume [m³] seen during the run (column separation only). */
   get maxCavityVolume(): number | undefined {
-    return this.engine instanceof CavitationEngine ? this.engine.maxCavityVolume : undefined;
+    return this.engine?.maxCavityVolume;
   }
 
   /** Serialize results + time stamps to a JSON-safe object. */
