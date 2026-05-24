@@ -1,5 +1,5 @@
 /**
- * Simple serial-engine benchmark. Run with `npm run bench`.
+ * Simple engine benchmark (default worker pool). Run with `npm run bench`.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

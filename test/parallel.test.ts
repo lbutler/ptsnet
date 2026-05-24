@@ -28,98 +28,78 @@ function maxDiff(a: Float64Array, b: Float64Array): number {
   return m;
 }
 
-describe('parallel engine (worker_threads)', () => {
-  it('hammer: parallel is bit-identical to serial', async () => {
-    const serial = await PtsnetSimulation.create({
-      inp: HAMMER_INP,
-      settings: { duration: 4, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
-    });
-    serial.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
-    serial.run();
+async function runHammer(workers: number) {
+  const sim = await PtsnetSimulation.create({
+    inp: HAMMER_INP,
+    settings: { duration: 4, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+    parallel: { workers },
+  });
+  sim.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
+  sim.run();
+  return sim;
+}
 
-    const par = await PtsnetSimulation.create({
-      inp: HAMMER_INP,
-      settings: { duration: 4, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
-      parallel: { workers: 4 },
-    });
-    par.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
-    par.run();
-
-    for (const label of serial.results.node.head.labels) {
-      expect(maxDiff(par.results.node.head.get(label), serial.results.node.head.get(label))).toBe(0);
+describe('the (parallel) engine', () => {
+  it('hammer: result is independent of worker count', async () => {
+    const one = await runHammer(1);
+    const many = await runHammer(4);
+    for (const label of one.results.node.head.labels) {
+      expect(maxDiff(many.results.node.head.get(label), one.results.node.head.get(label))).toBe(0);
     }
-    for (const label of serial.results.pipeEnd.flowrate.labels) {
-      expect(maxDiff(par.results.pipeEnd.flowrate.get(label), serial.results.pipeEnd.flowrate.get(label))).toBe(0);
+    for (const label of one.results.pipeEnd.flowrate.labels) {
+      expect(
+        maxDiff(many.results.pipeEnd.flowrate.get(label), one.results.pipeEnd.flowrate.get(label)),
+      ).toBe(0);
     }
   });
 
-  it('tnet3: parallel is bit-identical to serial', async () => {
+  it('tnet3: result is independent of worker count', async () => {
     const opts = {
       inp: exampleInp('TNET3'),
       settings: { duration: 2, timeStep: 0.1, defaultWaveSpeed: 1000, waveSpeedMethod: 'optimal' as const },
     };
-    const serial = await PtsnetSimulation.create(opts);
-    serial.defineValveOperation('VALVE-179', { initialSetting: 1, finalSetting: 0, startTime: 1, endTime: 2 });
-    serial.run();
+    const one = await PtsnetSimulation.create({ ...opts, parallel: { workers: 1 } });
+    one.defineValveOperation('VALVE-179', { initialSetting: 1, finalSetting: 0, startTime: 1, endTime: 2 });
+    one.run();
 
-    const par = await PtsnetSimulation.create({ ...opts, parallel: { workers: 4 } });
-    par.defineValveOperation('VALVE-179', { initialSetting: 1, finalSetting: 0, startTime: 1, endTime: 2 });
-    par.run();
+    const many = await PtsnetSimulation.create({ ...opts, parallel: { workers: 4 } });
+    many.defineValveOperation('VALVE-179', { initialSetting: 1, finalSetting: 0, startTime: 1, endTime: 2 });
+    many.run();
 
     let worst = 0;
-    for (const label of serial.results.node.head.labels) {
-      worst = Math.max(worst, maxDiff(par.results.node.head.get(label), serial.results.node.head.get(label)));
+    for (const label of one.results.node.head.labels) {
+      worst = Math.max(worst, maxDiff(many.results.node.head.get(label), one.results.node.head.get(label)));
     }
     expect(worst).toBe(0);
   });
 
-  it('runAsync (Atomics.waitAsync) is bit-identical to serial', async () => {
-    const serial = await PtsnetSimulation.create({
-      inp: HAMMER_INP,
-      settings: { duration: 4, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
-    });
-    serial.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
-    serial.run();
+  it('runAsync (Atomics.waitAsync) matches the synchronous run', async () => {
+    const sync = await runHammer(4);
 
-    const par = await PtsnetSimulation.create({
+    const asyncSim = await PtsnetSimulation.create({
       inp: HAMMER_INP,
       settings: { duration: 4, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
       parallel: { workers: 4 },
     });
-    par.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
-    expect(par.isParallel).toBe(true);
-    await par.runAsync();
+    asyncSim.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
+    await asyncSim.runAsync();
 
-    for (const label of serial.results.node.head.labels) {
-      expect(maxDiff(par.results.node.head.get(label), serial.results.node.head.get(label))).toBe(0);
+    for (const label of sync.results.node.head.labels) {
+      expect(maxDiff(asyncSim.results.node.head.get(label), sync.results.node.head.get(label))).toBe(0);
     }
   });
 
-  it('falls back to serial when SharedArrayBuffer is unusable', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('throws when SharedArrayBuffer-backed workers are unavailable', async () => {
     vi.stubGlobal('crossOriginIsolated', false); // simulate a non-isolated browser page
     try {
-      const serial = await PtsnetSimulation.create({
-        inp: HAMMER_INP,
-        settings: { duration: 2, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
-      });
-      serial.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
-      serial.run();
-
-      const fellBack = await PtsnetSimulation.create({
-        inp: HAMMER_INP,
-        settings: { duration: 2, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
-        parallel: { workers: 4 },
-      });
-      expect(fellBack.isParallel).toBe(false); // fell back to serial
-      fellBack.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
-      await fellBack.runAsync(); // works without a worker pool
-      expect(warn).toHaveBeenCalled();
-
-      expect(maxDiff(fellBack.results.node.head.get('J1'), serial.results.node.head.get('J1'))).toBe(0);
+      await expect(
+        PtsnetSimulation.create({
+          inp: HAMMER_INP,
+          settings: { duration: 2, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+        }),
+      ).rejects.toThrow(/SharedArrayBuffer/);
     } finally {
       vi.unstubAllGlobals();
-      warn.mockRestore();
     }
   });
 

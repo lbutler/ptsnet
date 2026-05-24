@@ -17,7 +17,8 @@ in the browser, and is published as a library.
 
 Steady-state initial conditions are obtained from
 [`epanet-js`](https://github.com/modelcreate/epanet-js) (OWA‑EPANET 2.2); the
-transient solution is computed by a self-contained serial MOC engine.
+transient solution is computed by a self-contained MOC engine that runs on a
+`SharedArrayBuffer`-backed worker pool.
 
 > This package is a conversion of the original Python research code. See
 > [Differences from the Python version](#differences-from-the-python-version)
@@ -154,11 +155,11 @@ await sim.runAsync({
 Aborting throws an `AbortError` (or the signal's `reason`); whatever was computed
 before the abort stays available on `sim.results`.
 
-### Parallel execution
+### The engine (always parallel)
 
-Large networks at fine resolution are dominated by the interior MOC stencil
-(~99% of the per-step work), which is embarrassingly parallel. Pass `parallel`
-to run it on a worker pool — Node `worker_threads` or browser Web Workers:
+There is a single engine and it always runs the interior MOC stencil — ~99% of
+the per-step work, and embarrassingly parallel — on a worker pool (Node
+`worker_threads` or browser Web Workers). Tune the pool size with `parallel`:
 
 ```ts
 const sim = await PtsnetSimulation.create({
@@ -169,26 +170,31 @@ const sim = await PtsnetSimulation.create({
 });
 ```
 
-Point arrays live in a `SharedArrayBuffer`; each worker owns a contiguous
-point range and reads the shared previous-step columns, so there is **no ghost
-exchange** and results are **bit-identical to the serial engine**. Only the cheap
-boundary kernels run on the main thread. Parallelism helps large models — small
-networks are faster serially (worker/barrier overhead).
+Point arrays live in a `SharedArrayBuffer`; each worker owns a contiguous point
+range and reads the shared previous-step columns, so there is **no ghost
+exchange** and results are **independent of the worker count**. Only the cheap
+boundary kernels run on the main thread.
+
+`workers: 1` (the default on a single-core host) runs the interior stencil
+**inline on the calling thread** — no worker spawn, no per-step barrier — so
+small and medium networks aren't taxed by parallel overhead. Reach for more
+workers on large models, where the per-step interior work dominates the barrier
+cost. (On a 5k-point TNET3, `workers: 1` beats `workers: 4` because the barrier
+overhead outweighs the parallelism; on millions of points the reverse holds.)
 
 #### `run()` vs `runAsync()`
 
 ```ts
-sim.run();         // synchronous; Node only for parallel runs (blocks the thread)
-await sim.runAsync(); // non-blocking; required for parallel in the browser, works everywhere
+sim.run();            // synchronous; Node only (blocks the thread on Atomics.wait)
+await sim.runAsync(); // non-blocking; required in the browser, works everywhere
 ```
 
 `run()` blocks the calling thread on `Atomics.wait`, which the browser main
 thread forbids — so **in the browser use `await sim.runAsync()`** (it uses
 `Atomics.waitAsync` and keeps the page responsive). Both auto-release the worker
-pool when finished; for manual `runStep`/`runStepAsync` loops call
-`sim.dispose()`. `sim.isParallel` reports whether a pool was actually started.
+pool when finished; for manual `runStep`/`runStepAsync` loops call `sim.dispose()`.
 
-#### Browser requirements & fallback
+#### Browser requirements
 
 `SharedArrayBuffer` needs the page to be **cross-origin isolated**, i.e. served
 with:
@@ -198,19 +204,19 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-If it isn't (or `SharedArrayBuffer` is otherwise unavailable), `create({ parallel })`
-**transparently falls back to the serial engine** (`sim.isParallel === false`) and
-everything still works — just on one thread. A runnable demo is in
-[`examples/browser`](examples/browser) (`npm run demo`, which sets those headers).
+If `SharedArrayBuffer`-backed workers are unavailable (a page without those
+headers, or no `worker_threads`), `create()` **throws** — there is no serial
+fallback. A runnable demo is in [`examples/browser`](examples/browser)
+(`npm run demo`, which sets those headers).
 
 On BWSN_F (12,530 nodes, ~3.2 M discretization points), per-step cost on a
 4-core machine:
 
-| Engine | ms/step | Speedup |
+| Workers | ms/step | Speedup |
 | --- | --- | --- |
-| serial | 68.9 | 1.0× |
-| `workers: 2` | 30.0 | 2.3× |
-| `workers: 4` | 19.1 | 3.6× |
+| 1 | 68.9 | 1.0× |
+| 2 | 30.0 | 2.3× |
+| 4 | 19.1 | 3.6× |
 
 ### Column separation (DGCM)
 
@@ -232,13 +238,14 @@ sim.maxCavityVolume; // largest vapor-cavity volume [m³]
 A tiny free-gas void fraction (α₀ ≈ 1e-7) is concentrated at each point; its
 volume follows the isothermal gas law and varies smoothly with pressure, which
 damps the 2Δt grid oscillation that makes the simpler Discrete *Vapor* Cavity
-Model spike. Validated on the canonical **Bergant–Simpson reservoir–pipe–valve**
-case ([`test/cavitation.test.ts`](test/cavitation.test.ts)): the head clamps at
-the vapor head, a cavity forms and collapses into a short-duration pulse
-exceeding the Joukowsky rise ("active" column separation), and the first peak
-matches `a·V₀/g`. This engine is **opt-in and serial**; it covers interior points
-and single/end valves (junction-node cavities and parallel cavitation are
-follow-ups). Default (cavitation off) runs are unchanged.
+Model spike. The workers solve the per-point gas quadratic; the main thread adds
+the valve gas cavities. Validated on the canonical **Bergant–Simpson
+reservoir–pipe–valve** case ([`test/cavitation.test.ts`](test/cavitation.test.ts)):
+the head clamps at the vapor head, a cavity forms and collapses into a
+short-duration pulse exceeding the Joukowsky rise ("active" column separation),
+and the first peak matches `a·V₀/g`. Column separation is **opt-in**; it covers
+interior points and single/end valves (junction-node cavities are a follow-up).
+Default (cavitation off) runs are unchanged.
 
 > Note: this is a *physical-correctness* feature, not a way to match the bundled
 > HAMMER references — those were run without column separation (their heads reach
@@ -250,10 +257,10 @@ follow-ups). Default (cavitation off) runs are unchanged.
 The port is faithful to the numerical engine (see parity numbers below). The
 following structural changes were made to fit a JavaScript library:
 
-- **Serial engine.** The Python code parallelizes points across MPI ranks
-  (`mpi4py`). JavaScript has no MPI, so this port runs a single serial engine
-  that owns every point. The kernels operate on plain typed arrays, so the same
-  shape can back a Web Worker / `worker_threads` implementation later.
+- **Worker-pool engine.** The Python code parallelizes points across MPI ranks
+  (`mpi4py`). JavaScript has no MPI, so this port partitions the points across a
+  `SharedArrayBuffer`-backed worker pool (`worker_threads` / Web Workers) instead;
+  the result is independent of the worker count.
 - **epanet-js for initial conditions.** The steady-state solve and `.inp`
   parsing use `epanet-js` (OWA‑EPANET 2.2) instead of `wntr` + the bundled
   EPANET DLLs.
@@ -339,7 +346,7 @@ npm install
 npm test          # vitest (includes the Python-parity check)
 npm run build     # vite library build (ESM + CJS) + .d.ts
 npm run typecheck
-npm run bench     # serial-engine benchmark (TNET3)
+npm run bench     # engine benchmark (TNET3)
 ```
 
 A runnable usage example lives in [`examples/run.mjs`](examples/run.mjs).

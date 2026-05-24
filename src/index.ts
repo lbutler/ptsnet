@@ -35,6 +35,6 @@ export type {
   Envelope,
 } from './core/results';
 
-export type { CavitationOptions } from './core/cavitationEngine';
+export type { CavitationOptions } from './core/boundaryPhase';
 export { loadInitialConditions } from './epanet/initialConditions';
 export { FlowUnit, HydParam, toSi } from './epanet/units';
