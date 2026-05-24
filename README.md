@@ -106,6 +106,69 @@ const labels = sim.results.node.head.labels;
 
 All physical quantities are SI (m, m³/s, m of head), matching the original.
 
+### Recording (large models)
+
+By default every node and pipe is recorded at every time step. For large
+networks or long runs the full `elements × steps` matrix can be huge (a 20 s
+transient of a 12.5k-node model at the default `optimal` time step is ~18 GB), so
+recording is configurable:
+
+```ts
+const sim = await PtsnetSimulation.create({
+  inp,
+  settings: { duration: 20, timeStep: 0.05 },
+  recording: {
+    nodes: ['JUNCTION-73'],   // string[] | 'all' (default) | 'none'
+    pipes: 'none',            // string[] | 'all' (default) | 'none'
+    every: 10,                // keep one sample every 10 steps (t=0 always kept)
+    envelope: true,           // also track per-element min/max over every step
+  },
+});
+sim.run();
+
+sim.results.node.head.get('JUNCTION-73'); // downsampled series
+sim.envelope!.node.headMax;               // max head at every node (O(elements))
+```
+
+`envelope` tracks per-element extrema over *all* steps (independent of the
+`nodes`/`pipes`/`every` selection), so `nodes: 'none', pipes: 'none', envelope:
+true` gives the full pressure envelope at O(elements) memory — bounded
+regardless of run length.
+
+### Parallel execution (Node)
+
+Large networks at fine resolution are dominated by the interior MOC stencil
+(~99% of the per-step work), which is embarrassingly parallel. Pass `parallel`
+to run it on a Node `worker_threads` pool:
+
+```ts
+const sim = await PtsnetSimulation.create({
+  inp,
+  settings: { duration: 20, timeStep: 0.05 },
+  recording: { nodes: 'none', pipes: 'none', envelope: true }, // bound memory
+  parallel: { workers: 8 }, // defaults to navigator.hardwareConcurrency
+});
+sim.run(); // worker pool is released automatically when run() finishes
+```
+
+Point arrays live in a `SharedArrayBuffer`; each worker owns a contiguous point
+range and reads the shared previous-step columns, so there is **no ghost
+exchange** and results are **bit-identical to the serial engine**. Only the cheap
+boundary kernels run on the main thread. Parallelism helps large models —
+small networks are faster serially (worker/barrier overhead).
+
+On BWSN_F (12,530 nodes, ~3.2 M discretization points), per-step cost on a
+4-core machine:
+
+| Engine | ms/step | Speedup |
+| --- | --- | --- |
+| serial | 68.9 | 1.0× |
+| `workers: 2` | 30.0 | 2.3× |
+| `workers: 4` | 19.1 | 3.6× |
+
+(Requires Node. For manual stepping with `runStep`, call `sim.dispose()` to
+release the pool. Browser Web Worker support is future work.)
+
 ## Differences from the Python version
 
 The port is faithful to the numerical engine (see parity numbers below). The

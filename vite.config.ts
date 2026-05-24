@@ -11,8 +11,9 @@ export default defineConfig({
     },
     sourcemap: true,
     rollupOptions: {
-      // Keep epanet-js external so the WASM engine isn't bundled.
-      external: ['epanet-js'],
+      // Keep epanet-js external so the WASM engine isn't bundled; worker_threads
+      // is a Node builtin used only on the parallel path.
+      external: ['epanet-js', 'node:worker_threads'],
     },
   },
   test: {

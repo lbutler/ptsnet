@@ -8,9 +8,16 @@ import { loadInitialConditions } from '../epanet/initialConditions';
 import { discretize } from './discretize';
 import { buildEngineModel, EngineModel } from './serialModel';
 import { SerialEngine } from './engine';
+import { ParallelEngine, WorkerCtor } from '../parallel/parallelEngine';
 import { checkCompatibility } from './validation';
 import { cubicSpline, linspace, roundHalfEven, pyFloorDiv } from './math';
-import { SimulationResults, SerializedResults, serializeResults } from './results';
+import {
+  SimulationResults,
+  SerializedResults,
+  serializeResults,
+  RecordingOptions,
+  Envelope,
+} from './results';
 
 const BUTTERFLY_X = [1, 0.8, 0.6, 0.4, 0.2, 0];
 const BUTTERFLY_Y = [0.067, 0.044, 0.024, 0.011, 0.004, 0.0];
@@ -110,6 +117,29 @@ export interface SimulationCreateOptions {
   /** Contents of the EPANET `.inp` file. */
   inp: string;
   settings?: PtsnetSettingsInput;
+  /** What to store. Defaults to every element at every step. */
+  recording?: RecordingOptions;
+  /**
+   * Run the transient on a Node `worker_threads` pool (helps large networks).
+   * Omit for the serial engine. `workers` defaults to the hardware concurrency.
+   */
+  parallel?: { workers?: number };
+}
+
+/** Common surface of the serial and parallel engines. */
+interface Engine {
+  runStep(t: number): void;
+  readonly results: SimulationResults;
+  readonly envelope: Envelope | undefined;
+  readonly time: Float64Array;
+  dispose?(): void;
+}
+
+async function loadWorkerCtor(): Promise<WorkerCtor> {
+  // Indirect specifier + vite-ignore so browser bundlers don't try to resolve it.
+  const spec = 'node:worker_threads';
+  const wt = (await import(/* @vite-ignore */ spec)) as { Worker: unknown };
+  return wt.Worker as WorkerCtor;
 }
 
 export interface ValveOperationOptions {
@@ -151,24 +181,24 @@ export class PtsnetSimulation {
   readonly settings: ResolvedSettings;
   readonly numSegments: number;
   readonly numPoints: number;
-  readonly time: Float64Array;
 
+  private readonly recording: RecordingOptions;
   private readonly curves = new Map<string, PtsnetCurve>();
   private readonly elementSettings: Record<SettingType, ElementSettings>;
   private model?: EngineModel;
-  private engine?: SerialEngine;
+  private engine?: Engine;
+  private parallelConfig?: { Worker: WorkerCtor; workers: number };
   private t = 0;
   private initialized = false;
   private updatedSettings = false;
 
-  private constructor(ss: SteadyState, settings: ResolvedSettings) {
+  private constructor(ss: SteadyState, settings: ResolvedSettings, recording: RecordingOptions) {
     this.ss = ss;
     this.settings = settings;
+    this.recording = recording;
     const disc = discretize(ss, settings);
     this.numSegments = disc.numSegments;
     this.numPoints = disc.numPoints;
-    this.time = new Float64Array(settings.timeSteps);
-    for (let i = 0; i < settings.timeSteps; i++) this.time[i] = i * settings.timeStep;
     this.elementSettings = {
       valve: new ElementSettings(),
       pump: new ElementSettings(),
@@ -182,7 +212,22 @@ export class PtsnetSimulation {
     const settings = resolveSettings(options.settings);
     const ss = await loadInitialConditions(options.inp, { period: settings.period });
     if (!settings.skipCompatibilityCheck) checkCompatibility(ss);
-    return new PtsnetSimulation(ss, settings);
+    const sim = new PtsnetSimulation(ss, settings, options.recording ?? {});
+    if (options.parallel) {
+      const Worker = await loadWorkerCtor();
+      const hw = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
+        ?.hardwareConcurrency;
+      sim.parallelConfig = { Worker, workers: options.parallel.workers ?? hw ?? 4 };
+    }
+    return sim;
+  }
+
+  /** Recorded time stamps [s] (one per stored sample; honours `recording.every`). */
+  get time(): Float64Array {
+    if (this.engine) return this.engine.time;
+    const t = new Float64Array(this.settings.timeSteps);
+    for (let i = 0; i < t.length; i++) t[i] = i * this.settings.timeStep;
+    return t;
   }
 
   // --- Curve / setting helpers ---
@@ -438,7 +483,25 @@ export class PtsnetSimulation {
     }
 
     this.model = buildEngineModel(this.ss, this.numPoints);
-    this.engine = new SerialEngine(this.ss, this.model, this.settings.timeStep, this.settings.timeSteps);
+    if (this.parallelConfig) {
+      this.engine = new ParallelEngine(
+        this.parallelConfig.Worker,
+        this.parallelConfig.workers,
+        this.ss,
+        this.model,
+        this.settings.timeStep,
+        this.settings.timeSteps,
+        this.recording,
+      );
+    } else {
+      this.engine = new SerialEngine(
+        this.ss,
+        this.model,
+        this.settings.timeStep,
+        this.settings.timeSteps,
+        this.recording,
+      );
+    }
     this.t = 1;
     this.initialized = true;
   }
@@ -511,10 +574,16 @@ export class PtsnetSimulation {
     this.t++;
   }
 
-  /** Run the full transient simulation. */
+  /** Run the full transient simulation. Disposes the worker pool (if any) when done. */
   run(): void {
     if (!this.initialized) this.initialize();
     while (!this.isOver) this.runStep();
+    this.dispose();
+  }
+
+  /** Release the worker pool (parallel runs). Safe to call multiple times. */
+  dispose(): void {
+    this.engine?.dispose?.();
   }
 
   // --- Results ---
@@ -522,6 +591,12 @@ export class PtsnetSimulation {
   get results(): SimulationResults {
     if (!this.engine) throw new Error('simulation has not been run yet');
     return this.engine.results;
+  }
+
+  /** Per-element min/max envelope over the whole run (if `recording.envelope`). */
+  get envelope(): Envelope | undefined {
+    if (!this.engine) throw new Error('simulation has not been run yet');
+    return this.engine.envelope;
   }
 
   /** Serialize results + time stamps to a JSON-safe object. */

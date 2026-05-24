@@ -30,6 +30,8 @@ export type {
   PipeResults,
   SerializedResults,
   SerializedSeries,
+  RecordingOptions,
+  Envelope,
 } from './core/results';
 
 export { loadInitialConditions } from './epanet/initialConditions';
