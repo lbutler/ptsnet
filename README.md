@@ -232,7 +232,13 @@ const sim = await PtsnetSimulation.create({
   cavitation: true, // or { voidFraction, vaporHead, barometricHead, psi }
 });
 sim.run();
-sim.maxCavityVolume; // largest vapor-cavity volume [m³]
+sim.maxCavityVolume; // largest vapor-cavity volume anywhere [m³]
+
+const report = sim.cavitationReport()!;
+report.valid;            // false if any cavity outgrew its mesh cell (A·Δx)
+report.worstFillFraction;// largest cavity / mesh-cell ratio
+report.nodes;            // [{ label, maxVolume, fillFraction }, …] junctions & end valves
+report.pipes;            // [{ label, maxVolume, fillFraction }, …] per pipe (interior peak)
 ```
 
 A tiny free-gas void fraction (α₀ ≈ 1e-7) is concentrated at each point; its
@@ -247,6 +253,11 @@ vapor head, a cavity forms and collapses into a short-duration pulse exceeding t
 Joukowsky rise — "active" column separation — and the first peak matches `a·V₀/g`)
 and on a high-point junction that clamps at its own elevation-set vapor head.
 Column separation is **opt-in**; default (cavitation off) runs are unchanged.
+
+`cavitationReport()` gives per-element peak cavity volumes (HAMMER records these
+per point) plus a `valid` flag — false when a cavity reached its mesh-cell volume,
+the point past which the discrete-cavity assumption breaks down. HAMMER leaves
+that check to the user; here it's surfaced (and, with `warningsOn`, logged).
 
 > Note: this is a *physical-correctness* feature, not a way to match the bundled
 > HAMMER references — those were run without column separation (their heads reach
