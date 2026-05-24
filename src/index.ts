@@ -1,0 +1,30 @@
+/**
+ * ptsnet — Transient simulation in water networks (Method of Characteristics).
+ *
+ * TypeScript port of PTSNET. Initial (steady-state) conditions are obtained via
+ * epanet-js; the transient solution is computed by a serial MOC engine.
+ */
+export { PtsnetSimulation } from './core/simulation';
+export type {
+  SimulationCreateOptions,
+  ValveOperationOptions,
+  PumpOperationOptions,
+} from './core/simulation';
+
+export type {
+  SteadyState,
+  NodeTable,
+  PipeTable,
+  PumpTable,
+  ValveTable,
+  PtsnetSettingsInput,
+  ResolvedSettings,
+  WaveSpeedMethod,
+} from './core/types';
+export { NODE_JUNCTION, NODE_RESERVOIR, NODE_TANK, G } from './core/types';
+
+export { ResultSeries } from './core/results';
+export type { SimulationResults, NodeResults, PipeResults } from './core/results';
+
+export { loadInitialConditions } from './epanet/initialConditions';
+export { FlowUnit, HydParam, toSi } from './epanet/units';
