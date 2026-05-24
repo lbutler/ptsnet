@@ -22,7 +22,13 @@
  */
 import { SteadyState } from './../core/types';
 import { EngineModel } from './../core/serialModel';
-import { SimulationResults, RecordingOptions, Envelope } from './../core/results';
+import {
+  SimulationResults,
+  RecordingOptions,
+  Envelope,
+  CavitationReport,
+  CavityElementReport,
+} from './../core/results';
 import { Recorder } from './../core/recorder';
 import {
   BoundaryState,
@@ -120,6 +126,9 @@ const WORKER_SOURCE = /* js */ `(function () {
   self.onmessage = function (e) { self.onmessage = null; start(e.data); };
 })();`;
 
+/** Sites with a peak cavity below this fraction of their mesh cell are omitted from the report. */
+const REPORT_THRESHOLD = 1e-4;
+
 function f64(n: number): { sab: SharedArrayBuffer; arr: Float64Array } {
   const sab = new SharedArrayBuffer(n * 8);
   return { sab, arr: new Float64Array(sab) };
@@ -169,6 +178,11 @@ export class ParallelEngine {
   private readonly C3J?: Float64Array;
   private readonly prevNetJ?: Float64Array;
   private readonly prevHeadJ?: Float64Array;
+  // Peak cavity volume per point/node + segment volume (A·Δx) for the validity check.
+  private readonly maxGasVol?: Float64Array;
+  private readonly maxGasVolJ?: Float64Array;
+  private readonly segVol?: Float64Array;
+  private readonly segVolJ?: Float64Array;
   private readonly psi: number;
   /** Largest gas-cavity volume [m³] seen during the run (cavitation only). */
   maxCavityVolume?: number;
@@ -245,6 +259,7 @@ export class ParallelEngine {
       this.Hgas = Hgas.arr;
       this.C3 = C3.arr;
       this.maxCavityVolume = 0;
+      this.segVol = new Float64Array(n);
       this.initGasState(qu.arr, gasVol.arr, Hgas.arr, C3.arr, isInt.arr, cavitation);
       const nj = model.numJip;
       this.gasVolJ = new Float64Array(nj);
@@ -252,7 +267,10 @@ export class ParallelEngine {
       this.C3J = new Float64Array(nj);
       this.prevNetJ = new Float64Array(nj);
       this.prevHeadJ = new Float64Array(nj);
+      this.segVolJ = new Float64Array(nj);
       this.initJunctionGasState(cavitation);
+      this.maxGasVol = gasVol.arr.slice();
+      this.maxGasVolJ = this.gasVolJ.slice();
       this.syncPoints = this.buildSyncPoints();
       Object.assign(shared, {
         quSab: qu.sab,
@@ -327,12 +345,14 @@ export class ParallelEngine {
       const z1 = ss.node.elevation[ss.pipe.startNode[p]];
       const z2 = ss.node.elevation[ss.pipe.endNode[p]];
       const seg = u - d;
-      const vol0 = alpha * ss.pipe.area[p] * ss.pipe.dx[p];
+      const cell = ss.pipe.area[p] * ss.pipe.dx[p];
+      const vol0 = alpha * cell;
       for (let j = d; j <= u; j++) {
         const z = z1 + ((z2 - z1) * (j - d)) / seg;
         Hgas[j] = z + vaporGauge;
         C3[j] = (model.initHead[j] - Hgas[j]) * vol0;
         gasVol[j] = vol0;
+        this.segVol![j] = cell;
       }
     }
   }
@@ -350,12 +370,20 @@ export class ParallelEngine {
       pointToJip[model.jipPoints[idx]] = model.jipNodeOfPoint[idx];
     }
     const vol0 = new Float64Array(model.numJip);
+    this.segVolJ!.fill(Infinity);
     for (let p = 0; p < ss.pipe.n; p++) {
-      const contrib = (alpha * ss.pipe.area[p] * ss.pipe.dx[p]) / 2;
+      const cell = ss.pipe.area[p] * ss.pipe.dx[p];
+      const contrib = (alpha * cell) / 2;
       const cd = pointToJip[model.dboundary[p]];
       const cu = pointToJip[model.uboundary[p]];
-      if (cd >= 0) vol0[cd] += contrib;
-      if (cu >= 0) vol0[cu] += contrib;
+      if (cd >= 0) {
+        vol0[cd] += contrib;
+        this.segVolJ![cd] = Math.min(this.segVolJ![cd], cell); // binding (smallest) adjacent cell
+      }
+      if (cu >= 0) {
+        vol0[cu] += contrib;
+        this.segVolJ![cu] = Math.min(this.segVolJ![cu], cell);
+      }
     }
 
     for (let c = 0; c < model.numJip; c++) {
@@ -389,6 +417,53 @@ export class ParallelEngine {
   }
   get time(): Float64Array {
     return this.recorder.time;
+  }
+
+  /**
+   * Per-element peak cavity volumes and a validity flag. `valid` is false if any
+   * site's cavity reached its mesh-cell volume (A·Δx) — the point past which the
+   * discrete-cavity assumption breaks down (HAMMER leaves this to the user).
+   */
+  cavitationReport(): CavitationReport | undefined {
+    if (!this.cav) return undefined;
+    const { model, ss } = this;
+    const maxV = this.maxGasVol!;
+    const segV = this.segVol!;
+    const maxVJ = this.maxGasVolJ!;
+    const segVJ = this.segVolJ!;
+    let worst = 0;
+
+    const pipes: CavityElementReport[] = [];
+    for (let p = 0; p < ss.pipe.n; p++) {
+      const d = model.dboundary[p];
+      const u = model.uboundary[p];
+      let vol = 0;
+      for (let j = d + 1; j < u; j++) if (maxV[j] > vol) vol = maxV[j];
+      const ff = vol / (ss.pipe.area[p] * ss.pipe.dx[p]);
+      if (ff > worst) worst = ff;
+      if (ff > REPORT_THRESHOLD) pipes.push({ label: ss.pipe.labels[p], maxVolume: vol, fillFraction: ff });
+    }
+
+    const nodes: CavityElementReport[] = [];
+    for (let c = 0; c < model.numJip; c++) {
+      const ff = maxVJ[c] / segVJ[c];
+      if (ff > worst) worst = ff;
+      if (ff > REPORT_THRESHOLD)
+        nodes.push({ label: ss.node.labels[model.ajip[c]], maxVolume: maxVJ[c], fillFraction: ff });
+    }
+    for (let k = 0; k < model.singleValvePoints.length; k++) {
+      const pt = model.singleValvePoints[k];
+      const ff = maxV[pt] / segV[pt];
+      if (ff > worst) worst = ff;
+      if (ff > REPORT_THRESHOLD)
+        nodes.push({
+          label: ss.node.labels[ss.valve.startNode[model.singleValveCtx[k]]],
+          maxVolume: maxV[pt],
+          fillFraction: ff,
+        });
+    }
+
+    return { maxVolume: this.maxCavityVolume!, valid: worst < 1, worstFillFraction: worst, pipes, nodes };
   }
 
   private dispatch(t0: number, t1: number): void {
@@ -443,10 +518,18 @@ export class ParallelEngine {
     );
     if (this.cav) {
       const gasVol = this.gasVol!;
+      const maxV = this.maxGasVol!;
       let max = this.maxCavityVolume!;
-      for (let i = 0; i < n; i++) if (gasVol[i] > max) max = gasVol[i];
+      for (let i = 0; i < n; i++) {
+        if (gasVol[i] > maxV[i]) maxV[i] = gasVol[i];
+        if (gasVol[i] > max) max = gasVol[i];
+      }
       const gj = this.gasVolJ!;
-      for (let c = 0; c < gj.length; c++) if (gj[c] > max) max = gj[c];
+      const maxVJ = this.maxGasVolJ!;
+      for (let c = 0; c < gj.length; c++) {
+        if (gj[c] > maxVJ[c]) maxVJ[c] = gj[c];
+        if (gj[c] > max) max = gj[c];
+      }
       this.maxCavityVolume = max;
     }
   }

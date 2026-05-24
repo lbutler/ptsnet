@@ -18,6 +18,7 @@ import {
   serializeResults,
   RecordingOptions,
   Envelope,
+  CavitationReport,
 } from './results';
 
 const BUTTERFLY_X = [1, 0.8, 0.6, 0.4, 0.2, 0];
@@ -628,6 +629,7 @@ export class PtsnetSimulation {
       this.runStep();
       this.afterStep(options, interval);
     }
+    this.warnInvalidCavitation();
     this.dispose();
   }
 
@@ -644,6 +646,7 @@ export class PtsnetSimulation {
       await this.runStepAsync();
       this.afterStep(options, interval);
     }
+    this.warnInvalidCavitation();
     this.dispose();
   }
 
@@ -668,6 +671,28 @@ export class PtsnetSimulation {
   /** Largest vapor-cavity volume [m³] seen during the run (column separation only). */
   get maxCavityVolume(): number | undefined {
     return this.engine?.maxCavityVolume;
+  }
+
+  /**
+   * Per-element column-separation diagnostics: peak cavity volume at each
+   * cavitating pipe/node and a `valid` flag that's false if any cavity outgrew
+   * its mesh cell. Returns `undefined` when cavitation wasn't enabled.
+   */
+  cavitationReport(): CavitationReport | undefined {
+    if (!this.engine) throw new Error('simulation has not been run yet');
+    return this.engine.cavitationReport();
+  }
+
+  private warnInvalidCavitation(): void {
+    if (!this.cavitationOptions || !this.settings.warningsOn) return;
+    const r = this.engine?.cavitationReport();
+    if (r && !r.valid) {
+      console.warn(
+        `ptsnet: a column-separation cavity reached its mesh-cell volume (worst fill fraction ` +
+          `${r.worstFillFraction.toFixed(1)}); the discrete-cavity model is unreliable there — ` +
+          `refine the mesh / time step near the worst site or treat those results with caution.`,
+      );
+    }
   }
 
   /** Serialize results + time stamps to a JSON-safe object. */
