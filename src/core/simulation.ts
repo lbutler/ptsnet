@@ -187,7 +187,8 @@ export class PtsnetSimulation {
 
   // --- Curve / setting helpers ---
 
-  private addCurve(name: string, type: CurveType, X: number[], Y: number[]): void {
+  /** Register a curve (`type` = 'valve' | 'pump'). Mirrors `add_curve`. */
+  addCurve(name: string, type: CurveType, X: number[], Y: number[]): void {
     const tbl = type === 'valve' ? this.ss.valve : this.ss.pump;
     if (tbl.labels.length === 0) {
       throw new Error(`There are no elements of type '${type}' in the model`);
@@ -195,7 +196,12 @@ export class PtsnetSimulation {
     this.curves.set(name, new PtsnetCurve(X, Y, type));
   }
 
-  private assignCurveTo(name: string, elements: string[]): void {
+  /** Assign a registered curve to elements (by label). Mirrors `assign_curve_to`. */
+  assignCurveTo(name: string, elements: string | string[]): void {
+    this.assignCurveToImpl(name, typeof elements === 'string' ? [elements] : elements);
+  }
+
+  private assignCurveToImpl(name: string, elements: string[]): void {
     if (elements.length === 0) throw new Error('No elements were specified');
     const curve = this.curves.get(name)!;
     const type = curve.type;
@@ -335,6 +341,86 @@ export class PtsnetSimulation {
         height: tankHeight,
         waterLevel,
       });
+    }
+  }
+
+  // --- Custom setting schedules (arbitrary time/value profiles) ---
+
+  private toF64(a: number[] | Float64Array): Float64Array {
+    return a instanceof Float64Array ? a : Float64Array.from(a);
+  }
+
+  defineValveSettings(name: string, X: number[] | Float64Array, Y: number[] | Float64Array): void {
+    this.defineElementSetting(name, 'valve', this.toF64(X), this.toF64(Y));
+  }
+
+  definePumpSettings(name: string, X: number[] | Float64Array, Y: number[] | Float64Array): void {
+    this.defineElementSetting(name, 'pump', this.toF64(X), this.toF64(Y));
+  }
+
+  defineBurstSettings(name: string, X: number[] | Float64Array, Y: number[] | Float64Array): void {
+    this.defineElementSetting(name, 'burst', this.toF64(X), this.toF64(Y));
+  }
+
+  defineDemandSettings(name: string, X: number[] | Float64Array, Y: number[] | Float64Array): void {
+    this.defineElementSetting(name, 'demand', this.toF64(X), this.toF64(Y));
+  }
+
+  // --- Manual real-time control (during stepping) ---
+
+  /** Whether the current time aligns with a `step`-second operation interval. */
+  canBeOperated(step: number, checkWarning = false): boolean {
+    const checkTime = this.t * this.settings.timeStep;
+    if (checkTime % step >= this.settings.timeStep) return false;
+    if (checkWarning) console.warn(`operating at time ${checkTime}`);
+    return true;
+  }
+
+  setValveSetting(name: string | string[], value: number | number[], step?: number, checkWarning = false): void {
+    this.setElementSetting('valve', name, value, step, checkWarning);
+  }
+
+  setPumpSetting(name: string | string[], value: number | number[], step?: number, checkWarning = false): void {
+    this.setElementSetting('pump', name, value, step, checkWarning);
+  }
+
+  setBurstSetting(name: string | string[], value: number | number[], step?: number, checkWarning = false): void {
+    this.setElementSetting('burst', name, value, step, checkWarning);
+  }
+
+  setDemandSetting(name: string | string[], value: number | number[], step?: number, checkWarning = false): void {
+    this.setElementSetting('demand', name, value, step, checkWarning);
+  }
+
+  private setElementSetting(
+    type: SettingType,
+    elementName: string | string[],
+    value: number | number[],
+    step?: number,
+    checkWarning = false,
+  ): void {
+    if (this.t === 0) throw new Error('simulation has not been initialized');
+    if (step !== undefined && !this.canBeOperated(step, checkWarning)) return;
+
+    const names = typeof elementName === 'string' ? [elementName] : elementName;
+    const values = Array.isArray(value) ? value : names.map(() => value);
+    if (names.length !== values.length) {
+      throw new Error("length of 'name' does not match length of 'value'");
+    }
+    for (const v of values) {
+      if ((type === 'valve' || type === 'pump') && (v < 0 || v > 1)) {
+        throw new Error(`setting for ${type} not in [0, 1]`);
+      }
+      if ((type === 'burst' || type === 'demand') && v < 0) {
+        throw new Error(`${type} coefficient has to be >= 0`);
+      }
+    }
+    const icType = SETTING_IC_TYPE[type];
+    const tbl = icType === 'valve' ? this.ss.valve : icType === 'pump' ? this.ss.pump : this.ss.node;
+    for (let i = 0; i < names.length; i++) {
+      const idx = tbl.index.get(names[i]);
+      if (idx === undefined) throw new Error(`unknown element '${names[i]}'`);
+      this.applySetting(type, idx, values[i]);
     }
   }
 

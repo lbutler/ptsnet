@@ -112,27 +112,72 @@ def run_hammer():
     return dump(sim)
 
 
-def run_tnet3():
+# A representative subset (incl. the largest-diverging nodes and the operated
+# valve's / pump's nodes) keeps the committed fixture small while staying a real check.
+TNET3_NODES = [
+    'JUNCTION-102', 'JUNCTION-103', '408-A', '408-B', '416-A', '416-B',
+    'JUNCTION-73', 'JUNCTION-55', 'JUNCTION-56', 'JUNCTION-49', 'JUNCTION-23',
+    'TANK-131', '217-A', '217-B', '221-A', '221-B',
+]
+TNET3_PIPES = ['LINK-98', 'LINK-59', 'LINK-15', 'LINK-139', 'LINK-99']
+
+
+def tnet3_sim(name):
     p = os.path.join(EXAMPLES, 'TNET3.inp')
-    sim = PTSNETSimulation(workspace_name='cmp_tnet3', inpfile=p, settings={
+    return PTSNETSimulation(workspace_name=name, inpfile=p, settings={
         'duration': 4.0, 'time_step': 0.1, 'default_wave_speed': 1000,
         'wave_speed_method': 'optimal', 'save_results': False})
+
+
+def run_tnet3():
+    sim = tnet3_sim('cmp_tnet3')
     sim.define_valve_operation('VALVE-179', initial_setting=1, final_setting=0, start_time=1, end_time=2)
     sim.run()
-    # A representative subset (incl. the largest-diverging nodes and the operated
-    # valve's nodes) keeps the committed fixture small while staying a real check.
-    node_labels = [
-        'JUNCTION-102', 'JUNCTION-103', '408-A', '408-B', '416-A', '416-B',
-        'JUNCTION-73', 'JUNCTION-55', 'JUNCTION-56', 'JUNCTION-49', 'JUNCTION-23',
-        'TANK-131', '217-A', '217-B', '221-A', '221-B',
-    ]
-    pipe_labels = ['LINK-98', 'LINK-59', 'LINK-15', 'LINK-139', 'LINK-99']
-    return dump(sim, node_labels=node_labels, pipe_labels=pipe_labels)
+    return dump(sim, TNET3_NODES, TNET3_PIPES)
+
+
+def run_tnet3_pump():
+    sim = tnet3_sim('cmp_tnet3_pump')
+    sim.define_pump_operation('PUMP-172', initial_setting=1, final_setting=0, start_time=1, end_time=3)
+    sim.run()
+    return dump(sim, TNET3_NODES + ['217-A', '217-B'], TNET3_PIPES)
+
+
+def run_tnet3_burst():
+    sim = tnet3_sim('cmp_tnet3_burst')
+    sim.add_burst('JUNCTION-73', burst_coeff=0.05, start_time=1, end_time=2)
+    sim.run()
+    return dump(sim, TNET3_NODES, TNET3_PIPES)
+
+
+def run_hammer_custom():
+    p = write_inp(HAMMER_INP, 'hammer.inp')
+    sim = PTSNETSimulation(workspace_name='cmp_hammer_custom', inpfile=p, settings={
+        'duration': 4.0, 'time_step': 0.05, 'default_wave_speed': 1000,
+        'wave_speed_method': 'user', 'save_results': False})
+    sim.define_valve_settings('V1', [0.5, 0.7, 0.9], [0.8, 0.4, 0.0])
+    sim.run()
+    return dump(sim)
+
+
+def run_simple_demand():
+    p = write_inp(SIMPLE_INP, 'simple.inp')
+    sim = PTSNETSimulation(workspace_name='cmp_simple_demand', inpfile=p, settings={
+        'duration': 1.0, 'time_step': 0.05, 'default_wave_speed': 1000,
+        'wave_speed_method': 'user', 'save_results': False})
+    sim.define_demand_settings('J1', [0.3, 0.6], [0.005, 0.02])
+    sim.run()
+    return dump(sim)
 
 
 if __name__ == '__main__':
     results = {}
-    for name, fn in [('simple', run_simple), ('hammer', run_hammer), ('tnet3', run_tnet3)]:
+    scenarios = [
+        ('simple', run_simple), ('hammer', run_hammer), ('tnet3', run_tnet3),
+        ('tnet3_pump', run_tnet3_pump), ('tnet3_burst', run_tnet3_burst),
+        ('hammer_custom', run_hammer_custom), ('simple_demand', run_simple_demand),
+    ]
+    for name, fn in scenarios:
         print('running', name, '...', flush=True)
         results[name] = fn()
         r = results[name]

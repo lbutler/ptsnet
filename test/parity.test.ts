@@ -78,28 +78,59 @@ function compareField(
   return { maxAbs, maxRel };
 }
 
-async function buildSim(scenario: string): Promise<PtsnetSimulation> {
-  if (scenario === 'simple') {
-    return PtsnetSimulation.create({
-      inp: SIMPLE_INP,
-      settings: { duration: 1.0, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
-    });
-  }
-  if (scenario === 'hammer') {
-    const sim = await PtsnetSimulation.create({
-      inp: HAMMER_INP,
-      settings: { duration: 4.0, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
-    });
-    sim.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
-    return sim;
-  }
-  // tnet3
-  const sim = await PtsnetSimulation.create({
+const simpleSim = () =>
+  PtsnetSimulation.create({
+    inp: SIMPLE_INP,
+    settings: { duration: 1.0, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+  });
+const hammerSim = () =>
+  PtsnetSimulation.create({
+    inp: HAMMER_INP,
+    settings: { duration: 4.0, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+  });
+const tnet3Sim = () =>
+  PtsnetSimulation.create({
     inp: exampleInp('TNET3'),
     settings: { duration: 4.0, timeStep: 0.1, defaultWaveSpeed: 1000, waveSpeedMethod: 'optimal' },
   });
-  sim.defineValveOperation('VALVE-179', { initialSetting: 1, finalSetting: 0, startTime: 1, endTime: 2 });
-  return sim;
+
+async function buildSim(scenario: string): Promise<PtsnetSimulation> {
+  switch (scenario) {
+    case 'simple':
+      return simpleSim();
+    case 'hammer': {
+      const sim = await hammerSim();
+      sim.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
+      return sim;
+    }
+    case 'tnet3': {
+      const sim = await tnet3Sim();
+      sim.defineValveOperation('VALVE-179', { initialSetting: 1, finalSetting: 0, startTime: 1, endTime: 2 });
+      return sim;
+    }
+    case 'tnet3_pump': {
+      const sim = await tnet3Sim();
+      sim.definePumpOperation('PUMP-172', { initialSetting: 1, finalSetting: 0, startTime: 1, endTime: 3 });
+      return sim;
+    }
+    case 'tnet3_burst': {
+      const sim = await tnet3Sim();
+      sim.addBurst('JUNCTION-73', 0.05, 1, 2);
+      return sim;
+    }
+    case 'hammer_custom': {
+      const sim = await hammerSim();
+      sim.defineValveSettings('V1', [0.5, 0.7, 0.9], [0.8, 0.4, 0.0]);
+      return sim;
+    }
+    case 'simple_demand': {
+      const sim = await simpleSim();
+      sim.defineDemandSettings('J1', [0.3, 0.6], [0.005, 0.02]);
+      return sim;
+    }
+    default:
+      throw new Error(`unknown scenario ${scenario}`);
+  }
 }
 
 const hasRef = existsSync(REF_PATH);
@@ -114,10 +145,16 @@ const TOL: Record<string, { head: number; flow: number }> = {
   simple: { head: 1e-5, flow: 1e-8 },
   hammer: { head: 5e-3, flow: 1e-5 },
   tnet3: { head: 1e-3, flow: 1e-6 },
+  tnet3_pump: { head: 1e-3, flow: 1e-6 },
+  tnet3_burst: { head: 1e-3, flow: 1e-6 },
+  hammer_custom: { head: 5e-3, flow: 1e-5 },
+  simple_demand: { head: 1e-5, flow: 1e-8 },
 };
 
+const SCENARIOS = ['simple', 'hammer', 'tnet3', 'tnet3_pump', 'tnet3_burst', 'hammer_custom', 'simple_demand'];
+
 describe.skipIf(!hasRef)('Python <-> JavaScript parity', () => {
-  for (const scenario of ['simple', 'hammer', 'tnet3']) {
+  for (const scenario of SCENARIOS) {
     it(`matches the Python reference: ${scenario}`, async () => {
       const ref = refData[scenario];
       const sim = await buildSim(scenario);

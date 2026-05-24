@@ -40,6 +40,20 @@ export function checkCompatibility(ss: SteadyState): void {
   checkDeg(pump.startNode, pump.labels, 'pump start');
   checkDeg(pump.endNode, pump.labels, 'pump end');
 
+  // Non-inline pumps cannot pull from a dead-end (non-source) junction.
+  for (let k = 0; k < pump.n; k++) {
+    if (pump.isInline[k]) continue;
+    const s = pump.startNode[k];
+    if (
+      node.degree[s] === 1 &&
+      node.degree[pump.endNode[k]] > 1 &&
+      node.type[s] !== NODE_TANK &&
+      node.type[s] !== NODE_RESERVOIR
+    ) {
+      throw new ModelError(`start node of pump '${pump.labels[k]}' is incompatible`);
+    }
+  }
+
   // Reservoirs cannot sit at the end of a pump or valve.
   for (let k = 0; k < pump.n; k++) {
     if (node.type[pump.endNode[k]] === NODE_RESERVOIR) {
@@ -58,6 +72,26 @@ export function checkCompatibility(ss: SteadyState): void {
   for (let k = 0; k < valve.n; k++) allNonPipe.push(valve.startNode[k], valve.endNode[k]);
   if (new Set(allNonPipe).size !== allNonPipe.length) {
     throw new ModelError('there are non-pipe elements connected to each other');
+  }
+
+  // No leaks/demands on non-pipe element nodes (except non-inline end nodes,
+  // which may legitimately carry demand downstream of an end valve).
+  const nonPipeNoBurst: number[] = [];
+  for (let k = 0; k < pump.n; k++) {
+    nonPipeNoBurst.push(pump.startNode[k]);
+    if (pump.isInline[k]) nonPipeNoBurst.push(pump.endNode[k]);
+  }
+  for (let k = 0; k < valve.n; k++) {
+    nonPipeNoBurst.push(valve.startNode[k]);
+    if (valve.isInline[k]) nonPipeNoBurst.push(valve.endNode[k]);
+  }
+  for (const nd of nonPipeNoBurst) {
+    if (node.leakCoefficient[nd] > 0) {
+      throw new ModelError(`non-pipe element connected to a leaking node '${node.labels[nd]}'`);
+    }
+    if (node.demandCoefficient[nd] > 0) {
+      throw new ModelError(`non-pipe element connected to a node with demand '${node.labels[nd]}'`);
+    }
   }
 
   // Demands cannot be negative (junctions only).
