@@ -135,6 +135,25 @@ sim.envelope!.node.headMax;               // max head at every node (O(elements)
 true` gives the full pressure envelope at O(elements) memory — bounded
 regardless of run length.
 
+### Progress, streaming & cancellation
+
+`run()` / `runAsync()` accept callbacks and an `AbortSignal`:
+
+```ts
+const controller = new AbortController();
+await sim.runAsync({
+  signal: controller.signal,                       // cancel; partial results remain on sim.results
+  onProgress: ({ fraction }) => updateBar(fraction),
+  onStep: (step) => {                              // stream live values (e.g. for plotting)
+    if (step % 50 === 0) draw(sim.results.node.head.get('JUNCTION-73'));
+  },
+  progressInterval: 25,                            // steps between onProgress calls
+});
+```
+
+Aborting throws an `AbortError` (or the signal's `reason`); whatever was computed
+before the abort stays available on `sim.results`.
+
 ### Parallel execution
 
 Large networks at fine resolution are dominated by the interior MOC stencil
@@ -263,6 +282,22 @@ equations).
 Beyond the cross-check, a [Joukowsky surge test](test/waterHammer.test.ts)
 confirms a rapid inline-valve closure produces a head rise of `a·V₀/g` within
 ~3 %.
+
+### Independent-solver validation (HAMMER)
+
+The PTSNET paper ships reference head time series for the TNET3 valve/pump/burst
+scenarios from PTSNET, TSNet and the commercial **Bentley HAMMER** solver
+(`publication/SI_results`). [`test/validationHammer.test.ts`](test/validationHammer.test.ts)
+confirms the TypeScript engine:
+
+- **reproduces the published PTSNET results** — initial state identical, max
+  deviation over 20 s of **1.5 m (valve), 0.03 m (pump), 0.006 m (burst)**; and
+- **agrees with HAMMER** on the steady state (0.07 m) and the up-surge peaks
+  (within **7.5%**).
+
+Down-surge minima differ because HAMMER models column separation (vapor
+cavities) and the basic MOC here does not — a known modeling difference, not an
+error (and a candidate future feature).
 
 ## Development
 
