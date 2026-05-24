@@ -407,31 +407,17 @@ export class PtsnetSimulation {
   }
 
   /**
-   * Install an (ideal) check valve at a node sitting between two pipes. It passes
-   * flow in the steady-state direction and shuts the instant flow reverses,
-   * preventing backflow (e.g. on the down-surge after a downstream valve closure
-   * or, later, a pump trip).
+   * Mark a pipe as carrying an (ideal) check valve: it passes flow in the
+   * steady-state direction and shuts the instant flow reverses, preventing
+   * backflow (e.g. on the down-surge after a downstream valve closure or, later,
+   * a pump trip). EPANET `CV`-status pipes are honored automatically; use this
+   * for check valves not already in the `.inp`. The valve is enforced at an end
+   * node of the pipe that joins exactly two pipes.
    */
-  addCheckValve(nodeName: string): void {
-    const node = this.ss.node;
-    const nodeId = node.index.get(nodeName);
-    if (nodeId === undefined) throw new Error(`unknown node '${nodeName}'`);
-    if (this.ss.checkValve.has(nodeName)) {
-      throw new Error(`node '${nodeName}' already has a check valve`);
-    }
-    if (this.ss.openProtection.has(nodeName) || this.ss.closedProtection.has(nodeName)) {
-      throw new Error(`node '${nodeName}' already has a surge protection`);
-    }
-    const onNonPipe = [
-      ...this.ss.pump.startNode,
-      ...this.ss.pump.endNode,
-      ...this.ss.valve.startNode,
-      ...this.ss.valve.endNode,
-    ].includes(nodeId);
-    if (node.degree[nodeId] !== 2 || onNonPipe) {
-      throw new Error(`node '${nodeName}' is not between two pipes`);
-    }
-    this.ss.checkValve.set(nodeName, { label: nodeName, node: nodeId });
+  addCheckValve(pipeName: string): void {
+    const idx = this.ss.pipe.index.get(pipeName);
+    if (idx === undefined) throw new Error(`unknown pipe '${pipeName}'`);
+    this.ss.pipe.isCheckValve[idx] = 1;
   }
 
   // --- Custom setting schedules (arbitrary time/value profiles) ---
@@ -527,7 +513,9 @@ export class PtsnetSimulation {
       this.assignCurveTo('butterfly', unassigned);
     }
 
-    this.model = buildEngineModel(this.ss, this.numPoints);
+    this.model = buildEngineModel(this.ss, this.numPoints, (msg) => {
+      if (this.settings.warningsOn) console.warn(`ptsnet: ${msg}`);
+    });
     this.engine = new ParallelEngine(
       this.workerBackend,
       this.workers,

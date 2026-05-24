@@ -46,6 +46,8 @@ export interface PipeTable {
   dx: Float64Array;
   type: Int32Array;
   isInline: Uint8Array;
+  /** 1 if this pipe carries a check valve (EPANET CV status, or added via API). */
+  isCheckValve: Uint8Array;
 }
 
 export interface PumpTable {
@@ -103,12 +105,6 @@ export interface ClosedProtection {
   waterLevel: number;
 }
 
-/** A check valve at a degree-2 node: passes flow in the steady-flow direction, shuts on reversal. */
-export interface CheckValve {
-  label: string;
-  node: number;
-}
-
 /** The complete steady-state model produced from the EPANET solve. */
 export interface SteadyState {
   node: NodeTable;
@@ -117,7 +113,6 @@ export interface SteadyState {
   valve: ValveTable;
   openProtection: Map<string, OpenProtection>;
   closedProtection: Map<string, ClosedProtection>;
-  checkValve: Map<string, CheckValve>;
   /** Adjacency: link names touching each node (by node index). */
   linksForNode: string[][];
 }

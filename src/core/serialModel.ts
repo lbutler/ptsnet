@@ -74,7 +74,11 @@ interface BoundaryRef {
   isU: boolean;
 }
 
-export function buildEngineModel(ss: SteadyState, numPoints: number): EngineModel {
+export function buildEngineModel(
+  ss: SteadyState,
+  numPoints: number,
+  warn: (msg: string) => void = () => {},
+): EngineModel {
   const pipe = ss.pipe;
   const node = ss.node;
   const valve = ss.valve;
@@ -311,17 +315,58 @@ export function buildEngineModel(ss: SteadyState, numPoints: number): EngineMode
     }
   }
 
-  // --- Check valves (degree-2 node between two pipes; passes flow u -> d). ---
+  // --- Check valves. A check valve is a pipe property (EPANET CV pipe or added
+  // via the API). It's enforced at one end node of the pipe, reusing the
+  // degree-2 series-junction solve: the check sits at an end node that joins
+  // exactly two pipes (and isn't a reservoir/tank/valve/pump or already used).
+  // It prevents reversal of the through-flow there, i.e. backflow through the
+  // pipe. CV pipes that can't be placed (e.g. at a multi-pipe junction) are
+  // warned about and left as plain pipes. ---
   const checkStart: number[] = [];
   const checkEnd: number[] = [];
-  for (const cv of ss.checkValve.values()) {
-    const refs = boundaryAtNode[cv.node];
+  const usedCheckNode = new Set<number>();
+  const nonPipeNode = new Set<number>();
+  for (let i = 0; i < valve.n; i++) {
+    nonPipeNode.add(valve.startNode[i]);
+    nonPipeNode.add(valve.endNode[i]);
+  }
+  for (let i = 0; i < pump.n; i++) {
+    nonPipeNode.add(pump.startNode[i]);
+    nonPipeNode.add(pump.endNode[i]);
+  }
+  const surgeNode = new Set<number>();
+  for (const prot of ss.openProtection.values()) surgeNode.add(prot.node);
+  for (const prot of ss.closedProtection.values()) surgeNode.add(prot.node);
+
+  const placeCheck = (n: number): boolean => {
+    if (
+      node.degree[n] !== 2 ||
+      node.type[n] === NODE_RESERVOIR ||
+      node.type[n] === NODE_TANK ||
+      nonPipeNode.has(n) ||
+      surgeNode.has(n) ||
+      usedCheckNode.has(n)
+    ) {
+      return false;
+    }
+    const refs = boundaryAtNode[n];
     const u = refs.find((r) => r.isU);
     const d = refs.find((r) => !r.isU);
-    if (u && d) {
-      checkStart.push(u.point);
-      checkEnd.push(d.point);
-    }
+    if (!u || !d) return false;
+    checkStart.push(u.point);
+    checkEnd.push(d.point);
+    usedCheckNode.add(n);
+    return true;
+  };
+
+  for (let p = 0; p < numPipes; p++) {
+    if (!pipe.isCheckValve[p]) continue;
+    // Prefer the downstream end (disc near the discharge), fall back to upstream.
+    if (placeCheck(pipe.endNode[p]) || placeCheck(pipe.startNode[p])) continue;
+    warn(
+      `check valve on pipe '${pipe.labels[p]}' could not be placed (needs an end node ` +
+        `joining exactly two pipes); modeled as a plain pipe`,
+    );
   }
 
   return {

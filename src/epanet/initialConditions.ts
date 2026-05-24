@@ -65,6 +65,7 @@ function makePipeTable(n: number): PipeTable {
     dx: new Float64Array(n),
     type: new Int32Array(n),
     isInline: new Uint8Array(n),
+    isCheckValve: new Uint8Array(n),
   };
 }
 
@@ -294,6 +295,7 @@ export async function loadInitialConditions(
       if (isPipe) {
         const pt = tbl as PipeTable;
         pipeLabels.push(linkIds[i]);
+        pt.isCheckValve[k] = lt === LinkType.CVPipe ? 1 : 0; // honor EPANET check-valve pipes
         pt.length[k] = toSi(flowUnits, model.getLinkValue(i, LinkProperty.Length), HydParam.Length);
       } else if (isPump) {
         const pt = tbl as PumpTable;
@@ -381,7 +383,6 @@ export async function loadInitialConditions(
       valve: valves,
       openProtection: new Map(),
       closedProtection: new Map(),
-      checkValve: new Map(),
       linksForNode,
     };
 
