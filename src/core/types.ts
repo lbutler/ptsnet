@@ -46,6 +46,8 @@ export interface PipeTable {
   dx: Float64Array;
   type: Int32Array;
   isInline: Uint8Array;
+  /** 1 if this pipe carries a check valve (EPANET CV status, or added via API). */
+  isCheckValve: Uint8Array;
 }
 
 export interface PumpTable {

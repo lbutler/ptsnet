@@ -406,6 +406,20 @@ export class PtsnetSimulation {
     }
   }
 
+  /**
+   * Mark a pipe as carrying an (ideal) check valve: it passes flow in the
+   * steady-state direction and shuts the instant flow reverses, preventing
+   * backflow (e.g. on the down-surge after a downstream valve closure or, later,
+   * a pump trip). EPANET `CV`-status pipes are honored automatically; use this
+   * for check valves not already in the `.inp`. The valve is enforced at an end
+   * node of the pipe that joins exactly two pipes.
+   */
+  addCheckValve(pipeName: string): void {
+    const idx = this.ss.pipe.index.get(pipeName);
+    if (idx === undefined) throw new Error(`unknown pipe '${pipeName}'`);
+    this.ss.pipe.isCheckValve[idx] = 1;
+  }
+
   // --- Custom setting schedules (arbitrary time/value profiles) ---
 
   private toF64(a: number[] | Float64Array): Float64Array {
@@ -499,7 +513,9 @@ export class PtsnetSimulation {
       this.assignCurveTo('butterfly', unassigned);
     }
 
-    this.model = buildEngineModel(this.ss, this.numPoints);
+    this.model = buildEngineModel(this.ss, this.numPoints, (msg) => {
+      if (this.settings.warningsOn) console.warn(`ptsnet: ${msg}`);
+    });
     this.engine = new ParallelEngine(
       this.workerBackend,
       this.workers,

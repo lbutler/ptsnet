@@ -75,6 +75,8 @@ sim.definePumpOperation(names, { initialSetting, finalSetting, startTime, endTim
 sim.addBurst(nodeNames, burstCoeff, startTime, endTime);
 sim.addSurgeProtection(nodeName, 'open',   tankArea);
 sim.addSurgeProtection(nodeName, 'closed', tankArea, tankHeight, waterLevel);
+sim.addCheckValve(pipeName); // forward-flow-only pipe; shuts on reversal (no backflow).
+                             // EPANET CV-status pipes are honored automatically.
 ```
 
 ### Results
