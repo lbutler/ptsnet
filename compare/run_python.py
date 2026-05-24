@@ -19,6 +19,46 @@ def _resource_filename_22(pkg, rel):
 tk.resource_filename = _resource_filename_22
 from ptsnet.simulation.sim import PTSNETSimulation
 
+# The Python surge-protection kernels never persist tank state between steps
+# (QT/HT/VA are rebound to locals). The TypeScript port fixes this. To validate
+# the fix we monkeypatch corrected kernels here so the reference is correct.
+from scipy import optimize
+import ptsnet.parallel.worker as _wk
+from ptsnet.simulation.funcs import tflow, tflow_prime
+
+
+def _run_open_protections_fixed(H0, H1, Q1, QT, aT, Cp, Bp, Cm, Bm, tau, where):
+    s = where.points['start_open_protection']
+    e = where.points['end_open_protection']
+    CP, BP, CM, BM = Cp[s], Bp[s], Cm[e], Bm[e]
+    CC, BB = CP + CM, BM + BP
+    H1[s] = (CC + QT + (2 * aT * H0[s] / tau)) / (BB + (2 * aT / tau))
+    H1[e] = H1[s]
+    Q1[s] = CP - H1[s] * BP
+    Q1[e] = H1[e] * BM - CM
+    QT[:] = Q1[s] - Q1[e]  # persist (the bug: original rebinds a local)
+
+
+def _run_closed_protections_fixed(H0, H1, Q1, QT0, QT1, HT0, HT1, VA, htank, aT, Cp, Bp, Cm, Bm, tau, C, where):
+    s = where.points['start_closed_protection']
+    e = where.points['end_closed_protection']
+    CP, BP, CM, BM = Cp[s], Bp[s], Cm[e], Bm[e]
+    CC, BB = CP + CM, BM + BP
+    qt1 = optimize.newton(tflow, QT0, fprime=tflow_prime,
+                          args=(QT0, CP, CM, BM, BP, HT0, tau, aT, VA, C), tol=1e-10)
+    ht1 = HT0 + (QT0 + qt1) / (2 * aT / tau)
+    H1[s] = (CC - qt1) / BB
+    H1[e] = H1[s]
+    Q1[s] = CP - H1[s] * BP
+    Q1[e] = H1[e] * BM - CM
+    VA[:] = (htank - ht1) * aT  # persist
+    HT0[:] = ht1
+    QT0[:] = qt1
+
+
+_wk.run_open_protections = _run_open_protections_fixed
+_wk.run_closed_protections = _run_closed_protections_fixed
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 EXAMPLES = os.path.join(os.path.dirname(HERE), 'ptsnet', 'examples')
 
@@ -170,12 +210,53 @@ def run_simple_demand():
     return dump(sim)
 
 
+SURGE_INP = """[TITLE]
+[JUNCTIONS]
+ JT 0 0
+ J2 0 50
+[RESERVOIRS]
+ R1 100
+[PIPES]
+ P1 R1 JT 1000 500 100 0 Open
+ P2 JT J2 1000 500 100 0 Open
+[OPTIONS]
+ Units LPS
+ Headloss H-W
+[TIMES]
+ Duration 0
+[END]
+"""
+
+
+def run_surge_open():
+    p = write_inp(SURGE_INP, 'surge.inp')
+    sim = PTSNETSimulation(workspace_name='cmp_surge_open', inpfile=p, settings={
+        'duration': 3.0, 'time_step': 0.05, 'default_wave_speed': 1000,
+        'wave_speed_method': 'user', 'save_results': False})
+    sim.add_surge_protection('JT', 'open', tank_area=2.0)
+    sim.add_burst('J2', burst_coeff=0.05, start_time=0.5, end_time=0.7)
+    sim.run()
+    return dump(sim)
+
+
+def run_surge_closed():
+    p = write_inp(SURGE_INP, 'surge.inp')
+    sim = PTSNETSimulation(workspace_name='cmp_surge_closed', inpfile=p, settings={
+        'duration': 3.0, 'time_step': 0.05, 'default_wave_speed': 1000,
+        'wave_speed_method': 'user', 'save_results': False})
+    sim.add_surge_protection('JT', 'closed', tank_area=2.0, tank_height=5.0, water_level=2.0)
+    sim.add_burst('J2', burst_coeff=0.05, start_time=0.5, end_time=0.7)
+    sim.run()
+    return dump(sim)
+
+
 if __name__ == '__main__':
     results = {}
     scenarios = [
         ('simple', run_simple), ('hammer', run_hammer), ('tnet3', run_tnet3),
         ('tnet3_pump', run_tnet3_pump), ('tnet3_burst', run_tnet3_burst),
         ('hammer_custom', run_hammer_custom), ('simple_demand', run_simple_demand),
+        ('surge_open', run_surge_open), ('surge_closed', run_surge_closed),
     ]
     for name, fn in scenarios:
         print('running', name, '...', flush=True)

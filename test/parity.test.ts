@@ -45,6 +45,23 @@ const HAMMER_INP = `[TITLE]
 [END]
 `;
 
+const SURGE_INP = `[TITLE]
+[JUNCTIONS]
+ JT 0 0
+ J2 0 50
+[RESERVOIRS]
+ R1 100
+[PIPES]
+ P1 R1 JT 1000 500 100 0 Open
+ P2 JT J2 1000 500 100 0 Open
+[OPTIONS]
+ Units LPS
+ Headloss H-W
+[TIMES]
+ Duration 0
+[END]
+`;
+
 interface ScenarioRef {
   time_step: number;
   time_steps: number;
@@ -93,6 +110,11 @@ const tnet3Sim = () =>
     inp: exampleInp('TNET3'),
     settings: { duration: 4.0, timeStep: 0.1, defaultWaveSpeed: 1000, waveSpeedMethod: 'optimal' },
   });
+const surgeSim = () =>
+  PtsnetSimulation.create({
+    inp: SURGE_INP,
+    settings: { duration: 3.0, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+  });
 
 async function buildSim(scenario: string): Promise<PtsnetSimulation> {
   switch (scenario) {
@@ -128,6 +150,18 @@ async function buildSim(scenario: string): Promise<PtsnetSimulation> {
       sim.defineDemandSettings('J1', [0.3, 0.6], [0.005, 0.02]);
       return sim;
     }
+    case 'surge_open': {
+      const sim = await surgeSim();
+      sim.addSurgeProtection('JT', 'open', 2.0);
+      sim.addBurst('J2', 0.05, 0.5, 0.7);
+      return sim;
+    }
+    case 'surge_closed': {
+      const sim = await surgeSim();
+      sim.addSurgeProtection('JT', 'closed', 2.0, 5.0, 2.0);
+      sim.addBurst('J2', 0.05, 0.5, 0.7);
+      return sim;
+    }
     default:
       throw new Error(`unknown scenario ${scenario}`);
   }
@@ -149,9 +183,14 @@ const TOL: Record<string, { head: number; flow: number }> = {
   tnet3_burst: { head: 1e-3, flow: 1e-6 },
   hammer_custom: { head: 5e-3, flow: 1e-5 },
   simple_demand: { head: 1e-5, flow: 1e-8 },
+  surge_open: { head: 1e-4, flow: 1e-6 },
+  surge_closed: { head: 1e-4, flow: 1e-6 },
 };
 
-const SCENARIOS = ['simple', 'hammer', 'tnet3', 'tnet3_pump', 'tnet3_burst', 'hammer_custom', 'simple_demand'];
+const SCENARIOS = [
+  'simple', 'hammer', 'tnet3', 'tnet3_pump', 'tnet3_burst',
+  'hammer_custom', 'simple_demand', 'surge_open', 'surge_closed',
+];
 
 describe.skipIf(!hasRef)('Python <-> JavaScript parity', () => {
   for (const scenario of SCENARIOS) {
