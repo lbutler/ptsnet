@@ -1,26 +1,18 @@
-__pycache__
-build
+node_modules
 dist
+build
+coverage
+*.tsbuildinfo
+*.log
+log.txt
 tmp
-local*
-*temp
-*workspaces
 
+# Python parity environment / leftovers (the reference is committed JSON)
+.venv*/
+__pycache__/
+*.pyc
+
+# Ignore dot-directories, but keep project config we track.
 .*/
 !/.gitignore
-*.bin
-*.rpt
-*.sh
-*.graph
-*.pyc
-# *.ipynb
-*.mesh
-*.egg-info
-*.sim
-*.pickle
-*.zarr
-*.net
-tests/_*
-tests/*.pdf
-tests/*.png
-log.txt
+!/.github/

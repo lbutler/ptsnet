@@ -1,0 +1,60 @@
+{
+  "name": "ptsnet",
+  "version": "0.2.0",
+  "description": "Transient simulation in water networks (Method of Characteristics) — TypeScript port of PTSNET",
+  "type": "module",
+  "main": "./dist/ptsnet.cjs",
+  "module": "./dist/ptsnet.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/ptsnet.js",
+      "require": "./dist/ptsnet.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "examples"
+  ],
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json --emitDeclarationOnly",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "bench": "tsx bench/run.ts"
+  },
+  "keywords": [
+    "water",
+    "hammer",
+    "transient",
+    "hydraulics",
+    "epanet",
+    "moc",
+    "simulation"
+  ],
+  "license": "Unlicense",
+  "dependencies": {
+    "epanet-js": "^0.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.19",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "vitest": "^2.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lbutler/ptsnet.git"
+  },
+  "homepage": "https://github.com/lbutler/ptsnet#readme",
+  "bugs": {
+    "url": "https://github.com/lbutler/ptsnet/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false
+}
