@@ -212,6 +212,39 @@ On BWSN_F (12,530 nodes, ~3.2 M discretization points), per-step cost on a
 | `workers: 2` | 30.0 | 2.3× |
 | `workers: 4` | 19.1 | 3.6× |
 
+### Column separation (DGCM)
+
+The basic MOC lets head drop arbitrarily below the liquid vapor pressure, which
+is unphysical (and makes the valve kernel `sqrt` a negative head). Enable column
+separation with the **Discrete Gas Cavity Model** to clamp head at vapor
+pressure:
+
+```ts
+const sim = await PtsnetSimulation.create({
+  inp,
+  settings: { duration: 0.5, timeStep: 5e-4, defaultWaveSpeed: 1319, waveSpeedMethod: 'user' },
+  cavitation: true, // or { voidFraction, vaporHead, barometricHead, psi }
+});
+sim.run();
+sim.maxCavityVolume; // largest vapor-cavity volume [m³]
+```
+
+A tiny free-gas void fraction (α₀ ≈ 1e-7) is concentrated at each point; its
+volume follows the isothermal gas law and varies smoothly with pressure, which
+damps the 2Δt grid oscillation that makes the simpler Discrete *Vapor* Cavity
+Model spike. Validated on the canonical **Bergant–Simpson reservoir–pipe–valve**
+case ([`test/cavitation.test.ts`](test/cavitation.test.ts)): the head clamps at
+the vapor head, a cavity forms and collapses into a short-duration pulse
+exceeding the Joukowsky rise ("active" column separation), and the first peak
+matches `a·V₀/g`. This engine is **opt-in and serial**; it covers interior points
+and single/end valves (junction-node cavities and parallel cavitation are
+follow-ups). Default (cavitation off) runs are unchanged.
+
+> Note: this is a *physical-correctness* feature, not a way to match the bundled
+> HAMMER references — those were run without column separation (their heads reach
+> ≈ −327 m pressure head), so cavitation makes ptsnet diverge from them by being
+> more physical, not less.
+
 ## Differences from the Python version
 
 The port is faithful to the numerical engine (see parity numbers below). The
