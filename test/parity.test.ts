@@ -62,6 +62,23 @@ const SURGE_INP = `[TITLE]
 [END]
 `;
 
+const CRIT_INP = `[TITLE]
+[JUNCTIONS]
+ J1 0 0
+ J2 0 30
+[RESERVOIRS]
+ R1 100
+[PIPES]
+ P1 R1 J1 1000 400 100 0 Open
+ P2 J1 J2 150 400 100 0 Open
+[OPTIONS]
+ Units LPS
+ Headloss H-W
+[TIMES]
+ Duration 0
+[END]
+`;
+
 interface ScenarioRef {
   time_step: number;
   time_steps: number;
@@ -115,6 +132,11 @@ const surgeSim = () =>
     inp: SURGE_INP,
     settings: { duration: 3.0, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
   });
+const exampleNoop = (name: string) =>
+  PtsnetSimulation.create({
+    inp: exampleInp(name),
+    settings: { duration: 1.0, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+  });
 
 async function buildSim(scenario: string): Promise<PtsnetSimulation> {
   switch (scenario) {
@@ -162,6 +184,28 @@ async function buildSim(scenario: string): Promise<PtsnetSimulation> {
       sim.addBurst('J2', 0.05, 0.5, 0.7);
       return sim;
     }
+    case 'loop':
+      return exampleNoop('LOOP');
+    case 'b0':
+      return exampleNoop('B0');
+    case 'b0_0':
+      return exampleNoop('B0_0');
+    case 'pipe_series':
+      return exampleNoop('PIPE_IN_SERIES');
+    case 'crit_critical':
+    case 'crit_dt': {
+      const sim = await PtsnetSimulation.create({
+        inp: CRIT_INP,
+        settings: {
+          duration: 2.0,
+          timeStep: 0.1,
+          defaultWaveSpeed: 1000,
+          waveSpeedMethod: scenario === 'crit_critical' ? 'critical' : 'dt',
+        },
+      });
+      sim.addBurst('J2', 0.02, 0.5, 0.8);
+      return sim;
+    }
     default:
       throw new Error(`unknown scenario ${scenario}`);
   }
@@ -185,11 +229,20 @@ const TOL: Record<string, { head: number; flow: number }> = {
   simple_demand: { head: 1e-5, flow: 1e-8 },
   surge_open: { head: 1e-4, flow: 1e-6 },
   surge_closed: { head: 1e-4, flow: 1e-6 },
+  // Example networks are in US (GPM) units; absolute flow diffs scale with the
+  // larger flow magnitudes, but stay at EPANET single-precision level.
+  loop: { head: 1e-4, flow: 1e-5 },
+  b0: { head: 1e-4, flow: 1e-5 },
+  b0_0: { head: 1e-4, flow: 1e-5 },
+  pipe_series: { head: 1e-4, flow: 1e-5 },
+  crit_critical: { head: 1e-5, flow: 1e-8 },
+  crit_dt: { head: 1e-5, flow: 1e-8 },
 };
 
 const SCENARIOS = [
   'simple', 'hammer', 'tnet3', 'tnet3_pump', 'tnet3_burst',
   'hammer_custom', 'simple_demand', 'surge_open', 'surge_closed',
+  'loop', 'b0', 'b0_0', 'pipe_series', 'crit_critical', 'crit_dt',
 ];
 
 describe.skipIf(!hasRef)('Python <-> JavaScript parity', () => {

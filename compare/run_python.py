@@ -250,6 +250,46 @@ def run_surge_closed():
     return dump(sim)
 
 
+CRIT_INP = """[TITLE]
+[JUNCTIONS]
+ J1 0 0
+ J2 0 30
+[RESERVOIRS]
+ R1 100
+[PIPES]
+ P1 R1 J1 1000 400 100 0 Open
+ P2 J1 J2 150 400 100 0 Open
+[OPTIONS]
+ Units LPS
+ Headloss H-W
+[TIMES]
+ Duration 0
+[END]
+"""
+
+
+def run_crit_method(name, method):
+    """A short second pipe forces the max_dt reduction, exercising the
+    'critical' / 'dt' segmentation branches (and a burst-driven transient)."""
+    p = write_inp(CRIT_INP, 'crit.inp')
+    sim = PTSNETSimulation(workspace_name=name, inpfile=p, settings={
+        'duration': 2.0, 'time_step': 0.1, 'default_wave_speed': 1000,
+        'wave_speed_method': method, 'save_results': False})
+    sim.add_burst('J2', burst_coeff=0.02, start_time=0.5, end_time=0.8)
+    sim.run()
+    return dump(sim)
+
+
+def run_example_noop(name):
+    """Steady-state (no operation) run of a bundled example network."""
+    p = os.path.join(EXAMPLES, name + '.inp')
+    sim = PTSNETSimulation(workspace_name='cmp_' + name, inpfile=p, settings={
+        'duration': 1.0, 'time_step': 0.05, 'default_wave_speed': 1000,
+        'wave_speed_method': 'user', 'save_results': False})
+    sim.run()
+    return dump(sim)
+
+
 if __name__ == '__main__':
     results = {}
     scenarios = [
@@ -257,6 +297,12 @@ if __name__ == '__main__':
         ('tnet3_pump', run_tnet3_pump), ('tnet3_burst', run_tnet3_burst),
         ('hammer_custom', run_hammer_custom), ('simple_demand', run_simple_demand),
         ('surge_open', run_surge_open), ('surge_closed', run_surge_closed),
+        ('loop', lambda: run_example_noop('LOOP')),
+        ('b0', lambda: run_example_noop('B0')),
+        ('b0_0', lambda: run_example_noop('B0_0')),
+        ('pipe_series', lambda: run_example_noop('PIPE_IN_SERIES')),
+        ('crit_critical', lambda: run_crit_method('cmp_crit_c', 'critical')),
+        ('crit_dt', lambda: run_crit_method('cmp_crit_dt', 'dt')),
     ]
     for name, fn in scenarios:
         print('running', name, '...', flush=True)
