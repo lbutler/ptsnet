@@ -8,7 +8,8 @@ import { loadInitialConditions } from '../epanet/initialConditions';
 import { discretize } from './discretize';
 import { buildEngineModel, EngineModel } from './serialModel';
 import { SerialEngine } from './engine';
-import { ParallelEngine, WorkerCtor } from '../parallel/parallelEngine';
+import { ParallelEngine } from '../parallel/parallelEngine';
+import { resolveBackend, WorkerBackend } from '../parallel/workerBackend';
 import { checkCompatibility } from './validation';
 import { cubicSpline, linspace, roundHalfEven, pyFloorDiv } from './math';
 import {
@@ -129,17 +130,11 @@ export interface SimulationCreateOptions {
 /** Common surface of the serial and parallel engines. */
 interface Engine {
   runStep(t: number): void;
+  runStepAsync?(t: number): Promise<void>;
   readonly results: SimulationResults;
   readonly envelope: Envelope | undefined;
   readonly time: Float64Array;
   dispose?(): void;
-}
-
-async function loadWorkerCtor(): Promise<WorkerCtor> {
-  // Indirect specifier + vite-ignore so browser bundlers don't try to resolve it.
-  const spec = 'node:worker_threads';
-  const wt = (await import(/* @vite-ignore */ spec)) as { Worker: unknown };
-  return wt.Worker as WorkerCtor;
 }
 
 export interface ValveOperationOptions {
@@ -187,7 +182,7 @@ export class PtsnetSimulation {
   private readonly elementSettings: Record<SettingType, ElementSettings>;
   private model?: EngineModel;
   private engine?: Engine;
-  private parallelConfig?: { Worker: WorkerCtor; workers: number };
+  private parallelConfig?: { backend: WorkerBackend; workers: number };
   private t = 0;
   private initialized = false;
   private updatedSettings = false;
@@ -214,12 +209,25 @@ export class PtsnetSimulation {
     if (!settings.skipCompatibilityCheck) checkCompatibility(ss);
     const sim = new PtsnetSimulation(ss, settings, options.recording ?? {});
     if (options.parallel) {
-      const Worker = await loadWorkerCtor();
-      const hw = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
-        ?.hardwareConcurrency;
-      sim.parallelConfig = { Worker, workers: options.parallel.workers ?? hw ?? 4 };
+      const backend = await resolveBackend();
+      if (backend) {
+        const hw = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
+          ?.hardwareConcurrency;
+        sim.parallelConfig = { backend, workers: options.parallel.workers ?? hw ?? 4 };
+      } else {
+        // SharedArrayBuffer unavailable (e.g. a page without cross-origin
+        // isolation): fall back to the serial engine.
+        console.warn(
+          'ptsnet: parallel execution requires SharedArrayBuffer (cross-origin isolation in the browser); running serially.',
+        );
+      }
     }
     return sim;
+  }
+
+  /** Whether the transient will run on a worker pool (false if it fell back to serial). */
+  get isParallel(): boolean {
+    return this.parallelConfig !== undefined;
   }
 
   /** Recorded time stamps [s] (one per stored sample; honours `recording.every`). */
@@ -485,7 +493,7 @@ export class PtsnetSimulation {
     this.model = buildEngineModel(this.ss, this.numPoints);
     if (this.parallelConfig) {
       this.engine = new ParallelEngine(
-        this.parallelConfig.Worker,
+        this.parallelConfig.backend,
         this.parallelConfig.workers,
         this.ss,
         this.model,
@@ -566,7 +574,7 @@ export class PtsnetSimulation {
     return this.t;
   }
 
-  /** Advance the simulation by a single time step. */
+  /** Advance the simulation by a single time step (synchronous). */
   runStep(): void {
     if (!this.initialized) this.initialize();
     if (!this.updatedSettings) this.updateSettings();
@@ -574,10 +582,37 @@ export class PtsnetSimulation {
     this.t++;
   }
 
-  /** Run the full transient simulation. Disposes the worker pool (if any) when done. */
+  /** Advance by a single time step without blocking the calling thread. */
+  async runStepAsync(): Promise<void> {
+    if (!this.initialized) this.initialize();
+    if (!this.updatedSettings) this.updateSettings();
+    const e = this.engine!;
+    if (e.runStepAsync) await e.runStepAsync(this.t);
+    else e.runStep(this.t);
+    this.t++;
+  }
+
+  /**
+   * Run the full transient simulation synchronously. Disposes the worker pool
+   * (if any) when done. In the browser, parallel runs must use {@link runAsync}
+   * because the main thread cannot block on `Atomics.wait`.
+   */
   run(): void {
+    if (this.parallelConfig && typeof window !== 'undefined') {
+      throw new Error('In the browser, parallel simulations must use `await sim.runAsync()`.');
+    }
     if (!this.initialized) this.initialize();
     while (!this.isOver) this.runStep();
+    this.dispose();
+  }
+
+  /**
+   * Run the full transient simulation without blocking the calling thread
+   * (uses `Atomics.waitAsync` for parallel runs). Works in the browser and Node.
+   */
+  async runAsync(): Promise<void> {
+    if (!this.initialized) this.initialize();
+    while (!this.isOver) await this.runStepAsync();
     this.dispose();
   }
 

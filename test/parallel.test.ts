@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PtsnetSimulation } from '../src/index';
 import { exampleInp } from './fixtures';
 
@@ -71,6 +71,56 @@ describe('parallel engine (worker_threads)', () => {
       worst = Math.max(worst, maxDiff(par.results.node.head.get(label), serial.results.node.head.get(label)));
     }
     expect(worst).toBe(0);
+  });
+
+  it('runAsync (Atomics.waitAsync) is bit-identical to serial', async () => {
+    const serial = await PtsnetSimulation.create({
+      inp: HAMMER_INP,
+      settings: { duration: 4, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+    });
+    serial.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
+    serial.run();
+
+    const par = await PtsnetSimulation.create({
+      inp: HAMMER_INP,
+      settings: { duration: 4, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+      parallel: { workers: 4 },
+    });
+    par.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
+    expect(par.isParallel).toBe(true);
+    await par.runAsync();
+
+    for (const label of serial.results.node.head.labels) {
+      expect(maxDiff(par.results.node.head.get(label), serial.results.node.head.get(label))).toBe(0);
+    }
+  });
+
+  it('falls back to serial when SharedArrayBuffer is unusable', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('crossOriginIsolated', false); // simulate a non-isolated browser page
+    try {
+      const serial = await PtsnetSimulation.create({
+        inp: HAMMER_INP,
+        settings: { duration: 2, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+      });
+      serial.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
+      serial.run();
+
+      const fellBack = await PtsnetSimulation.create({
+        inp: HAMMER_INP,
+        settings: { duration: 2, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+        parallel: { workers: 4 },
+      });
+      expect(fellBack.isParallel).toBe(false); // fell back to serial
+      fellBack.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
+      await fellBack.runAsync(); // works without a worker pool
+      expect(warn).toHaveBeenCalled();
+
+      expect(maxDiff(fellBack.results.node.head.get('J1'), serial.results.node.head.get('J1'))).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      warn.mockRestore();
+    }
   });
 
   it('works with recording options and disposes cleanly', async () => {
