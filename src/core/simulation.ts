@@ -10,7 +10,7 @@ import { buildEngineModel, EngineModel } from './serialModel';
 import { SerialEngine } from './engine';
 import { checkCompatibility } from './validation';
 import { cubicSpline, linspace, roundHalfEven, pyFloorDiv } from './math';
-import { SimulationResults } from './results';
+import { SimulationResults, SerializedResults, serializeResults } from './results';
 
 const BUTTERFLY_X = [1, 0.8, 0.6, 0.4, 0.2, 0];
 const BUTTERFLY_Y = [0.067, 0.044, 0.024, 0.011, 0.004, 0.0];
@@ -498,6 +498,11 @@ export class PtsnetSimulation {
     return this.t > this.settings.timeSteps - 1;
   }
 
+  /** Current time-step index (0 before the first step). */
+  get currentStep(): number {
+    return this.t;
+  }
+
   /** Advance the simulation by a single time step. */
   runStep(): void {
     if (!this.initialized) this.initialize();
@@ -517,6 +522,11 @@ export class PtsnetSimulation {
   get results(): SimulationResults {
     if (!this.engine) throw new Error('simulation has not been run yet');
     return this.engine.results;
+  }
+
+  /** Serialize results + time stamps to a JSON-safe object. */
+  serializeResults(): SerializedResults {
+    return serializeResults(this.results, this.time);
   }
 
   get allValves(): string[] {

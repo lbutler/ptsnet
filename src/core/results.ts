@@ -55,3 +55,61 @@ export interface SimulationResults {
   pipeStart: PipeResults;
   pipeEnd: PipeResults;
 }
+
+// --- Serialization (JSON-safe; replaces the Python HDF5 workspaces) ---
+
+export interface SerializedSeries {
+  labels: string[];
+  cols: number;
+  data: number[];
+}
+
+export interface SerializedResults {
+  time: number[];
+  node: { head: SerializedSeries; leakFlow: SerializedSeries; demandFlow: SerializedSeries };
+  pipeStart: { flowrate: SerializedSeries };
+  pipeEnd: { flowrate: SerializedSeries };
+}
+
+function seriesToJSON(s: ResultSeries): SerializedSeries {
+  return { labels: s.labels, cols: s.cols, data: Array.from(s.data) };
+}
+
+function seriesFromJSON(o: SerializedSeries): ResultSeries {
+  const s = new ResultSeries(o.labels, o.cols);
+  s.data.set(o.data);
+  return s;
+}
+
+/** Convert results + time stamps into a JSON-serializable object. */
+export function serializeResults(results: SimulationResults, time: Float64Array): SerializedResults {
+  return {
+    time: Array.from(time),
+    node: {
+      head: seriesToJSON(results.node.head),
+      leakFlow: seriesToJSON(results.node.leakFlow),
+      demandFlow: seriesToJSON(results.node.demandFlow),
+    },
+    pipeStart: { flowrate: seriesToJSON(results.pipeStart.flowrate) },
+    pipeEnd: { flowrate: seriesToJSON(results.pipeEnd.flowrate) },
+  };
+}
+
+/** Reconstruct results + time stamps from `serializeResults` output. */
+export function deserializeResults(obj: SerializedResults): {
+  results: SimulationResults;
+  time: Float64Array;
+} {
+  return {
+    time: Float64Array.from(obj.time),
+    results: {
+      node: {
+        head: seriesFromJSON(obj.node.head),
+        leakFlow: seriesFromJSON(obj.node.leakFlow),
+        demandFlow: seriesFromJSON(obj.node.demandFlow),
+      },
+      pipeStart: { flowrate: seriesFromJSON(obj.pipeStart.flowrate) },
+      pipeEnd: { flowrate: seriesFromJSON(obj.pipeEnd.flowrate) },
+    },
+  };
+}

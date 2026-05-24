@@ -23,8 +23,14 @@ export type {
 } from './core/types';
 export { NODE_JUNCTION, NODE_RESERVOIR, NODE_TANK, G } from './core/types';
 
-export { ResultSeries } from './core/results';
-export type { SimulationResults, NodeResults, PipeResults } from './core/results';
+export { ResultSeries, serializeResults, deserializeResults } from './core/results';
+export type {
+  SimulationResults,
+  NodeResults,
+  PipeResults,
+  SerializedResults,
+  SerializedSeries,
+} from './core/results';
 
 export { loadInitialConditions } from './epanet/initialConditions';
 export { FlowUnit, HydParam, toSi } from './epanet/units';
