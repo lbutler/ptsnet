@@ -56,6 +56,33 @@ export interface SimulationResults {
   pipeEnd: PipeResults;
 }
 
+/**
+ * Controls what the engine stores, to bound memory on large/long simulations.
+ * Defaults reproduce the original behaviour (every element, every step).
+ */
+export interface RecordingOptions {
+  /** Node labels to keep time series for. `'all'` (default) or `'none'`. */
+  nodes?: string[] | 'all' | 'none';
+  /** Pipe labels to keep time series for. `'all'` (default) or `'none'`. */
+  pipes?: string[] | 'all' | 'none';
+  /** Keep one sample every `every` steps (default 1). t=0 is always kept. */
+  every?: number;
+  /** Also track per-element min/max over every step (O(elements) memory). */
+  envelope?: boolean;
+}
+
+/** Per-element extrema over the whole run (independent of `nodes`/`pipes`/`every`). */
+export interface Envelope {
+  node: { labels: string[]; headMin: Float64Array; headMax: Float64Array };
+  pipe: {
+    labels: string[];
+    startMin: Float64Array;
+    startMax: Float64Array;
+    endMin: Float64Array;
+    endMax: Float64Array;
+  };
+}
+
 // --- Serialization (JSON-safe; replaces the Python HDF5 workspaces) ---
 
 export interface SerializedSeries {

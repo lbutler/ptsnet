@@ -8,7 +8,8 @@
  */
 import { SteadyState } from './types';
 import { EngineModel } from './serialModel';
-import { SimulationResults, ResultSeries } from './results';
+import { SimulationResults, RecordingOptions, Envelope } from './results';
+import { Recorder } from './recorder';
 import {
   runInteriorStep,
   runGeneralJunction,
@@ -22,7 +23,7 @@ const HB = 10.3;
 const GAS_EXP = 1.2;
 
 export class SerialEngine {
-  readonly results: SimulationResults;
+  private readonly recorder: Recorder;
   private readonly flow: [Float64Array, Float64Array];
   private readonly head: [Float64Array, Float64Array];
   private readonly Cp: Float64Array;
@@ -46,6 +47,7 @@ export class SerialEngine {
     private readonly model: EngineModel,
     private readonly timeStep: number,
     timeSteps: number,
+    recording: RecordingOptions = {},
   ) {
     const n = model.numPoints;
     this.flow = [new Float64Array(n), new Float64Array(n)];
@@ -66,17 +68,21 @@ export class SerialEngine {
     this.closedVA = new Float64Array(model.closedStart.length);
     this.closedC = new Float64Array(model.closedStart.length);
 
-    this.results = {
-      node: {
-        head: new ResultSeries(model.nodeResultLabels, timeSteps),
-        leakFlow: new ResultSeries(model.nodeResultLabels, timeSteps),
-        demandFlow: new ResultSeries(model.nodeResultLabels, timeSteps),
-      },
-      pipeStart: { flowrate: new ResultSeries(ss.pipe.labels, timeSteps) },
-      pipeEnd: { flowrate: new ResultSeries(ss.pipe.labels, timeSteps) },
-    };
+    this.recorder = new Recorder(model, ss, timeSteps, timeStep, recording);
 
     this.loadInitialConditions();
+  }
+
+  get results(): SimulationResults {
+    return this.recorder.results;
+  }
+
+  get envelope(): Envelope | undefined {
+    return this.recorder.envelope;
+  }
+
+  get time(): Float64Array {
+    return this.recorder.time;
   }
 
   private loadInitialConditions(): void {
@@ -84,22 +90,10 @@ export class SerialEngine {
     this.flow[0].set(model.initFlow);
     this.head[0].set(model.initHead);
 
-    const pipe = ss.pipe;
-    for (let p = 0; p < pipe.n; p++) {
-      this.results.pipeStart.flowrate.set(p, 0, model.initFlow[model.dboundary[p]]);
-      this.results.pipeEnd.flowrate.set(p, 0, model.initFlow[model.uboundary[p]]);
-    }
+    // t = 0: leak/demand come from the steady-state coefficients (e1/d1 = null).
+    this.recorder.record(0, this.head[0], this.flow[0], null, null);
 
     const node = ss.node;
-    for (let r = 0; r < model.numResultNodes; r++) {
-      const nodeId = model.allToNode[r];
-      const pt = model.allToPoints[r];
-      this.results.node.head.set(r, 0, model.initHead[pt]);
-      const sqrtP = node.pressure[nodeId] > 0 ? Math.sqrt(node.pressure[nodeId]) : 0;
-      this.results.node.leakFlow.set(r, 0, node.leakCoefficient[nodeId] * sqrtP);
-      this.results.node.demandFlow.set(r, 0, node.demandCoefficient[nodeId] * sqrtP);
-    }
-
     // Closed surge-protection initial state.
     for (let i = 0; i < model.closedStart.length; i++) {
       const wl = model.closedWaterLevel[i];
@@ -154,10 +148,6 @@ export class SerialEngine {
         this.jSb,
         this.jHH,
       );
-      for (let c = 0; c < model.numJip; c++) {
-        this.results.node.leakFlow.set(c, t, this.E1[c]);
-        this.results.node.demandFlow.set(c, t, this.D1[c]);
-      }
     }
 
     runValveStep(
@@ -208,14 +198,7 @@ export class SerialEngine {
       );
     }
 
-    // Store results.
-    const pipe = ss.pipe;
-    for (let p = 0; p < pipe.n; p++) {
-      this.results.pipeStart.flowrate.set(p, t, Q1[model.dboundary[p]]);
-      this.results.pipeEnd.flowrate.set(p, t, Q1[model.uboundary[p]]);
-    }
-    for (let r = 0; r < model.numResultNodes; r++) {
-      this.results.node.head.set(r, t, H1[model.allToPoints[r]]);
-    }
+    // Store results (subset / downsampling / envelope handled by the recorder).
+    this.recorder.record(t, H1, Q1, this.E1, this.D1);
   }
 }

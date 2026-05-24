@@ -106,6 +106,35 @@ const labels = sim.results.node.head.labels;
 
 All physical quantities are SI (m, m³/s, m of head), matching the original.
 
+### Recording (large models)
+
+By default every node and pipe is recorded at every time step. For large
+networks or long runs the full `elements × steps` matrix can be huge (a 20 s
+transient of a 12.5k-node model at the default `optimal` time step is ~18 GB), so
+recording is configurable:
+
+```ts
+const sim = await PtsnetSimulation.create({
+  inp,
+  settings: { duration: 20, timeStep: 0.05 },
+  recording: {
+    nodes: ['JUNCTION-73'],   // string[] | 'all' (default) | 'none'
+    pipes: 'none',            // string[] | 'all' (default) | 'none'
+    every: 10,                // keep one sample every 10 steps (t=0 always kept)
+    envelope: true,           // also track per-element min/max over every step
+  },
+});
+sim.run();
+
+sim.results.node.head.get('JUNCTION-73'); // downsampled series
+sim.envelope!.node.headMax;               // max head at every node (O(elements))
+```
+
+`envelope` tracks per-element extrema over *all* steps (independent of the
+`nodes`/`pipes`/`every` selection), so `nodes: 'none', pipes: 'none', envelope:
+true` gives the full pressure envelope at O(elements) memory — bounded
+regardless of run length.
+
 ## Differences from the Python version
 
 The port is faithful to the numerical engine (see parity numbers below). The
