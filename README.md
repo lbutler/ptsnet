@@ -238,14 +238,15 @@ sim.maxCavityVolume; // largest vapor-cavity volume [m³]
 A tiny free-gas void fraction (α₀ ≈ 1e-7) is concentrated at each point; its
 volume follows the isothermal gas law and varies smoothly with pressure, which
 damps the 2Δt grid oscillation that makes the simpler Discrete *Vapor* Cavity
-Model spike. The workers solve the per-point gas quadratic; the main thread adds
-the valve gas cavities. Validated on the canonical **Bergant–Simpson
-reservoir–pipe–valve** case ([`test/cavitation.test.ts`](test/cavitation.test.ts)):
-the head clamps at the vapor head, a cavity forms and collapses into a
-short-duration pulse exceeding the Joukowsky rise ("active" column separation),
-and the first peak matches `a·V₀/g`. Column separation is **opt-in**; it covers
-interior points and single/end valves (junction-node cavities are a follow-up).
-Default (cavitation off) runs are unchanged.
+Model spike. Cavities form at **interior points, single/end valves, and junction
+nodes** (high points, knees, multi-pipe junctions): the workers solve the
+per-point gas quadratic, and the main-thread boundary phase adds the valve and
+junction-node gas cavities. Validated in [`test/cavitation.test.ts`](test/cavitation.test.ts)
+on the canonical **Bergant–Simpson reservoir–pipe–valve** case (head clamps at the
+vapor head, a cavity forms and collapses into a short-duration pulse exceeding the
+Joukowsky rise — "active" column separation — and the first peak matches `a·V₀/g`)
+and on a high-point junction that clamps at its own elevation-set vapor head.
+Column separation is **opt-in**; default (cavitation off) runs are unchanged.
 
 > Note: this is a *physical-correctness* feature, not a way to match the bundled
 > HAMMER references — those were run without column separation (their heads reach
