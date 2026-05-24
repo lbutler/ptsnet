@@ -280,6 +280,72 @@ def run_crit_method(name, method):
     return dump(sim)
 
 
+PUMP_INP = """[TITLE]
+[JUNCTIONS]
+ J1 0 0
+ J2 0 40
+[RESERVOIRS]
+ R1 10
+[PUMPS]
+ PMP R1 J1 HEAD C1
+[PIPES]
+ P1 J1 J2 1000 400 100 0 Open
+[CURVES]
+ C1 0 80
+ C1 50 60
+ C1 100 0
+[OPTIONS]
+ Units LPS
+ Headloss H-W
+[TIMES]
+ Duration 0
+[END]
+"""
+
+
+def run_single_pump():
+    """Reservoir -> pump -> pipe (single/end pump), with a pump trip; exercises
+    the run_pump_step single-pump branch not reached by TNET3 (inline pumps)."""
+    p = write_inp(PUMP_INP, 'pump.inp')
+    sim = PTSNETSimulation(workspace_name='cmp_single_pump', inpfile=p, settings={
+        'duration': 2.0, 'time_step': 0.05, 'default_wave_speed': 1000,
+        'wave_speed_method': 'user', 'save_results': False})
+    sim.define_pump_operation('PMP', initial_setting=1, final_setting=0, start_time=0.5, end_time=1.5)
+    sim.run()
+    return dump(sim)
+
+
+VALVE_INP = """[TITLE]
+[JUNCTIONS]
+ J1 0 0
+ J2 0 40
+[RESERVOIRS]
+ R1 100
+[PIPES]
+ P1 R1 J1 1000 400 100 0 Open
+[VALVES]
+ V1 J1 J2 400 TCV 5 0
+[OPTIONS]
+ Units LPS
+ Headloss H-W
+[TIMES]
+ Duration 0
+[END]
+"""
+
+
+def run_single_valve():
+    """Pipe -> end valve -> demand (single valve); exercises the run_valve_step
+    single-valve branch not reached by TNET3 / hammer (inline valves)."""
+    p = write_inp(VALVE_INP, 'valve.inp')
+    sim = PTSNETSimulation(workspace_name='cmp_single_valve', inpfile=p, settings={
+        'duration': 2.0, 'time_step': 0.05, 'default_wave_speed': 1000,
+        'wave_speed_method': 'user', 'save_results': False})
+    sim.define_valve_operation('V1', initial_setting=1, final_setting=0, start_time=0.5, end_time=1.0)
+    sim.run()
+    return dump(sim)
+
+
 def run_example_noop(name):
     """Steady-state (no operation) run of a bundled example network."""
     p = os.path.join(EXAMPLES, name + '.inp')
@@ -303,6 +369,8 @@ if __name__ == '__main__':
         ('pipe_series', lambda: run_example_noop('PIPE_IN_SERIES')),
         ('crit_critical', lambda: run_crit_method('cmp_crit_c', 'critical')),
         ('crit_dt', lambda: run_crit_method('cmp_crit_dt', 'dt')),
+        ('single_pump', run_single_pump),
+        ('single_valve', run_single_valve),
     ]
     for name, fn in scenarios:
         print('running', name, '...', flush=True)

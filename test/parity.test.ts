@@ -62,6 +62,46 @@ const SURGE_INP = `[TITLE]
 [END]
 `;
 
+const PUMP_INP = `[TITLE]
+[JUNCTIONS]
+ J1 0 0
+ J2 0 40
+[RESERVOIRS]
+ R1 10
+[PUMPS]
+ PMP R1 J1 HEAD C1
+[PIPES]
+ P1 J1 J2 1000 400 100 0 Open
+[CURVES]
+ C1 0 80
+ C1 50 60
+ C1 100 0
+[OPTIONS]
+ Units LPS
+ Headloss H-W
+[TIMES]
+ Duration 0
+[END]
+`;
+
+const VALVE_INP = `[TITLE]
+[JUNCTIONS]
+ J1 0 0
+ J2 0 40
+[RESERVOIRS]
+ R1 100
+[PIPES]
+ P1 R1 J1 1000 400 100 0 Open
+[VALVES]
+ V1 J1 J2 400 TCV 5 0
+[OPTIONS]
+ Units LPS
+ Headloss H-W
+[TIMES]
+ Duration 0
+[END]
+`;
+
 const CRIT_INP = `[TITLE]
 [JUNCTIONS]
  J1 0 0
@@ -206,6 +246,22 @@ async function buildSim(scenario: string): Promise<PtsnetSimulation> {
       sim.addBurst('J2', 0.02, 0.5, 0.8);
       return sim;
     }
+    case 'single_pump': {
+      const sim = await PtsnetSimulation.create({
+        inp: PUMP_INP,
+        settings: { duration: 2.0, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+      });
+      sim.definePumpOperation('PMP', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.5 });
+      return sim;
+    }
+    case 'single_valve': {
+      const sim = await PtsnetSimulation.create({
+        inp: VALVE_INP,
+        settings: { duration: 2.0, timeStep: 0.05, defaultWaveSpeed: 1000, waveSpeedMethod: 'user' },
+      });
+      sim.defineValveOperation('V1', { initialSetting: 1, finalSetting: 0, startTime: 0.5, endTime: 1.0 });
+      return sim;
+    }
     default:
       throw new Error(`unknown scenario ${scenario}`);
   }
@@ -237,12 +293,15 @@ const TOL: Record<string, { head: number; flow: number }> = {
   pipe_series: { head: 1e-4, flow: 1e-5 },
   crit_critical: { head: 1e-5, flow: 1e-8 },
   crit_dt: { head: 1e-5, flow: 1e-8 },
+  single_pump: { head: 1e-4, flow: 1e-6 },
+  single_valve: { head: 1e-4, flow: 1e-6 },
 };
 
 const SCENARIOS = [
   'simple', 'hammer', 'tnet3', 'tnet3_pump', 'tnet3_burst',
   'hammer_custom', 'simple_demand', 'surge_open', 'surge_closed',
   'loop', 'b0', 'b0_0', 'pipe_series', 'crit_critical', 'crit_dt',
+  'single_pump', 'single_valve',
 ];
 
 describe.skipIf(!hasRef)('Python <-> JavaScript parity', () => {
