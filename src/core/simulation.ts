@@ -10,6 +10,7 @@ import { buildEngineModel, EngineModel } from './serialModel';
 import { SerialEngine } from './engine';
 import { ParallelEngine } from '../parallel/parallelEngine';
 import { resolveBackend, WorkerBackend } from '../parallel/workerBackend';
+import { CavitationEngine, CavitationOptions } from './cavitationEngine';
 import { checkCompatibility } from './validation';
 import { cubicSpline, linspace, roundHalfEven, pyFloorDiv } from './math';
 import {
@@ -125,6 +126,11 @@ export interface SimulationCreateOptions {
    * Omit for the serial engine. `workers` defaults to the hardware concurrency.
    */
   parallel?: { workers?: number };
+  /**
+   * Enable column separation (Discrete Vapor Cavity Model) so head cannot drop
+   * below the liquid vapor pressure. `true` uses defaults. Runs serially.
+   */
+  cavitation?: boolean | CavitationOptions;
 }
 
 /** Streaming / progress / cancellation options for {@link PtsnetSimulation.run}. */
@@ -199,6 +205,7 @@ export class PtsnetSimulation {
   private model?: EngineModel;
   private engine?: Engine;
   private parallelConfig?: { backend: WorkerBackend; workers: number };
+  private cavitationOptions?: CavitationOptions;
   private t = 0;
   private initialized = false;
   private updatedSettings = false;
@@ -224,7 +231,12 @@ export class PtsnetSimulation {
     const ss = await loadInitialConditions(options.inp, { period: settings.period });
     if (!settings.skipCompatibilityCheck) checkCompatibility(ss);
     const sim = new PtsnetSimulation(ss, settings, options.recording ?? {});
-    if (options.parallel) {
+    if (options.cavitation) {
+      sim.cavitationOptions = options.cavitation === true ? {} : options.cavitation;
+      if (options.parallel) {
+        console.warn('ptsnet: column separation runs serially; ignoring the `parallel` option.');
+      }
+    } else if (options.parallel) {
       const backend = await resolveBackend();
       if (backend) {
         const hw = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
@@ -507,7 +519,16 @@ export class PtsnetSimulation {
     }
 
     this.model = buildEngineModel(this.ss, this.numPoints);
-    if (this.parallelConfig) {
+    if (this.cavitationOptions) {
+      this.engine = new CavitationEngine(
+        this.ss,
+        this.model,
+        this.settings.timeStep,
+        this.settings.timeSteps,
+        this.recording,
+        this.cavitationOptions,
+      );
+    } else if (this.parallelConfig) {
       this.engine = new ParallelEngine(
         this.parallelConfig.backend,
         this.parallelConfig.workers,
@@ -680,6 +701,11 @@ export class PtsnetSimulation {
   get envelope(): Envelope | undefined {
     if (!this.engine) throw new Error('simulation has not been run yet');
     return this.engine.envelope;
+  }
+
+  /** Largest vapor-cavity volume [m³] seen during the run (column separation only). */
+  get maxCavityVolume(): number | undefined {
+    return this.engine instanceof CavitationEngine ? this.engine.maxCavityVolume : undefined;
   }
 
   /** Serialize results + time stamps to a JSON-safe object. */
