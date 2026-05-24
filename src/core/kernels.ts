@@ -53,6 +53,9 @@ export function runGeneralJunction(
   Kd: Float64Array,
   Z: Float64Array,
   m: EngineModel,
+  sc: Float64Array,
+  sb: Float64Array,
+  HH: Float64Array,
 ): void {
   const { jipDboundaries, jipUboundaries, jipPoints, jipNodeOfPoint, ajip, numJip } = m;
 
@@ -67,8 +70,8 @@ export function runGeneralJunction(
     Bp[u] = 1 / Bp[u];
   }
 
-  const sc = new Float64Array(numJip);
-  const sb = new Float64Array(numJip);
+  sc.fill(0);
+  sb.fill(0);
   for (let idx = 0; idx < jipPoints.length; idx++) {
     const p = jipPoints[idx];
     const c = jipNodeOfPoint[idx];
@@ -76,7 +79,6 @@ export function runGeneralJunction(
     sb[c] += Bm[p] + Bp[p];
   }
 
-  const HH = new Float64Array(numJip);
   for (let c = 0; c < numJip; c++) {
     const X = sc[c] / sb[c];
     const i = ajip[c];

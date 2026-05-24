@@ -31,6 +31,9 @@ export class SerialEngine {
   private readonly Bm: Float64Array;
   private readonly E1: Float64Array;
   private readonly D1: Float64Array;
+  private readonly jSc: Float64Array;
+  private readonly jSb: Float64Array;
+  private readonly jHH: Float64Array;
 
   private readonly openQT: Float64Array;
   private readonly closedQT0: Float64Array;
@@ -53,6 +56,9 @@ export class SerialEngine {
     this.Bm = new Float64Array(n);
     this.E1 = new Float64Array(model.numJip);
     this.D1 = new Float64Array(model.numJip);
+    this.jSc = new Float64Array(model.numJip);
+    this.jSb = new Float64Array(model.numJip);
+    this.jHH = new Float64Array(model.numJip);
 
     this.openQT = new Float64Array(model.openStart.length);
     this.closedQT0 = new Float64Array(model.closedStart.length);
@@ -144,6 +150,9 @@ export class SerialEngine {
         ss.node.demandCoefficient,
         ss.node.elevation,
         model,
+        this.jSc,
+        this.jSb,
+        this.jHH,
       );
       for (let c = 0; c < model.numJip; c++) {
         this.results.node.leakFlow.set(c, t, this.E1[c]);

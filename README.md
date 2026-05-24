@@ -6,6 +6,10 @@
   <b>ptsnet</b> — Transient Simulation in Water Networks, in TypeScript
 </p>
 
+<p align="center">
+  <a href="https://github.com/lbutler/ptsnet/actions/workflows/ci.yml"><img src="https://github.com/lbutler/ptsnet/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
 `ptsnet` is a TypeScript port of [PTSNET](https://github.com/gandresr/PTSNET), a
 simulator for hydraulic transients (water hammer) in water distribution
 networks using the **Method of Characteristics (MOC)**. It runs in Node.js and
@@ -180,7 +184,10 @@ npm install
 npm test          # vitest (includes the Python-parity check)
 npm run build     # vite library build (ESM + CJS) + .d.ts
 npm run typecheck
+npm run bench     # serial-engine benchmark (TNET3)
 ```
+
+A runnable usage example lives in [`examples/run.mjs`](examples/run.mjs).
 
 ### The original Python code
 
