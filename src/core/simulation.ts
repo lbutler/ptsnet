@@ -8,6 +8,7 @@ import { loadInitialConditions } from '../epanet/initialConditions';
 import { discretize } from './discretize';
 import { buildEngineModel, EngineModel } from './serialModel';
 import { SerialEngine } from './engine';
+import { ParallelEngine, WorkerCtor } from '../parallel/parallelEngine';
 import { checkCompatibility } from './validation';
 import { cubicSpline, linspace, roundHalfEven, pyFloorDiv } from './math';
 import {
@@ -118,6 +119,27 @@ export interface SimulationCreateOptions {
   settings?: PtsnetSettingsInput;
   /** What to store. Defaults to every element at every step. */
   recording?: RecordingOptions;
+  /**
+   * Run the transient on a Node `worker_threads` pool (helps large networks).
+   * Omit for the serial engine. `workers` defaults to the hardware concurrency.
+   */
+  parallel?: { workers?: number };
+}
+
+/** Common surface of the serial and parallel engines. */
+interface Engine {
+  runStep(t: number): void;
+  readonly results: SimulationResults;
+  readonly envelope: Envelope | undefined;
+  readonly time: Float64Array;
+  dispose?(): void;
+}
+
+async function loadWorkerCtor(): Promise<WorkerCtor> {
+  // Indirect specifier + vite-ignore so browser bundlers don't try to resolve it.
+  const spec = 'node:worker_threads';
+  const wt = (await import(/* @vite-ignore */ spec)) as { Worker: unknown };
+  return wt.Worker as WorkerCtor;
 }
 
 export interface ValveOperationOptions {
@@ -164,7 +186,8 @@ export class PtsnetSimulation {
   private readonly curves = new Map<string, PtsnetCurve>();
   private readonly elementSettings: Record<SettingType, ElementSettings>;
   private model?: EngineModel;
-  private engine?: SerialEngine;
+  private engine?: Engine;
+  private parallelConfig?: { Worker: WorkerCtor; workers: number };
   private t = 0;
   private initialized = false;
   private updatedSettings = false;
@@ -189,7 +212,14 @@ export class PtsnetSimulation {
     const settings = resolveSettings(options.settings);
     const ss = await loadInitialConditions(options.inp, { period: settings.period });
     if (!settings.skipCompatibilityCheck) checkCompatibility(ss);
-    return new PtsnetSimulation(ss, settings, options.recording ?? {});
+    const sim = new PtsnetSimulation(ss, settings, options.recording ?? {});
+    if (options.parallel) {
+      const Worker = await loadWorkerCtor();
+      const hw = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
+        ?.hardwareConcurrency;
+      sim.parallelConfig = { Worker, workers: options.parallel.workers ?? hw ?? 4 };
+    }
+    return sim;
   }
 
   /** Recorded time stamps [s] (one per stored sample; honours `recording.every`). */
@@ -453,13 +483,25 @@ export class PtsnetSimulation {
     }
 
     this.model = buildEngineModel(this.ss, this.numPoints);
-    this.engine = new SerialEngine(
-      this.ss,
-      this.model,
-      this.settings.timeStep,
-      this.settings.timeSteps,
-      this.recording,
-    );
+    if (this.parallelConfig) {
+      this.engine = new ParallelEngine(
+        this.parallelConfig.Worker,
+        this.parallelConfig.workers,
+        this.ss,
+        this.model,
+        this.settings.timeStep,
+        this.settings.timeSteps,
+        this.recording,
+      );
+    } else {
+      this.engine = new SerialEngine(
+        this.ss,
+        this.model,
+        this.settings.timeStep,
+        this.settings.timeSteps,
+        this.recording,
+      );
+    }
     this.t = 1;
     this.initialized = true;
   }
@@ -532,10 +574,16 @@ export class PtsnetSimulation {
     this.t++;
   }
 
-  /** Run the full transient simulation. */
+  /** Run the full transient simulation. Disposes the worker pool (if any) when done. */
   run(): void {
     if (!this.initialized) this.initialize();
     while (!this.isOver) this.runStep();
+    this.dispose();
+  }
+
+  /** Release the worker pool (parallel runs). Safe to call multiple times. */
+  dispose(): void {
+    this.engine?.dispose?.();
   }
 
   // --- Results ---

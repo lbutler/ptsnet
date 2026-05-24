@@ -135,6 +135,40 @@ sim.envelope!.node.headMax;               // max head at every node (O(elements)
 true` gives the full pressure envelope at O(elements) memory — bounded
 regardless of run length.
 
+### Parallel execution (Node)
+
+Large networks at fine resolution are dominated by the interior MOC stencil
+(~99% of the per-step work), which is embarrassingly parallel. Pass `parallel`
+to run it on a Node `worker_threads` pool:
+
+```ts
+const sim = await PtsnetSimulation.create({
+  inp,
+  settings: { duration: 20, timeStep: 0.05 },
+  recording: { nodes: 'none', pipes: 'none', envelope: true }, // bound memory
+  parallel: { workers: 8 }, // defaults to navigator.hardwareConcurrency
+});
+sim.run(); // worker pool is released automatically when run() finishes
+```
+
+Point arrays live in a `SharedArrayBuffer`; each worker owns a contiguous point
+range and reads the shared previous-step columns, so there is **no ghost
+exchange** and results are **bit-identical to the serial engine**. Only the cheap
+boundary kernels run on the main thread. Parallelism helps large models —
+small networks are faster serially (worker/barrier overhead).
+
+On BWSN_F (12,530 nodes, ~3.2 M discretization points), per-step cost on a
+4-core machine:
+
+| Engine | ms/step | Speedup |
+| --- | --- | --- |
+| serial | 68.9 | 1.0× |
+| `workers: 2` | 30.0 | 2.3× |
+| `workers: 4` | 19.1 | 3.6× |
+
+(Requires Node. For manual stepping with `runStep`, call `sim.dispose()` to
+release the pool. Browser Web Worker support is future work.)
+
 ## Differences from the Python version
 
 The port is faithful to the numerical engine (see parity numbers below). The
