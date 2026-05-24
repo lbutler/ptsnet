@@ -14,6 +14,11 @@
  * quadratic instead of the plain stencil, carrying two flow faces (qu/qd) and a
  * persistent gas volume; the main thread adds the valve gas cavities. See
  * {@link ./../core/boundaryPhase} and the project README.
+ *
+ * When the pool size is 1 (`workers: 1`, or a single-core/`n === 1` case) the
+ * interior stencil runs inline on the calling thread — no worker spawn, no
+ * barrier — via {@link runInteriorStep} / {@link runInteriorStepCav}, which
+ * mirror the two branches of the worker source below (keep them in sync).
  */
 import { SteadyState } from './../core/types';
 import { EngineModel } from './../core/serialModel';
@@ -28,6 +33,7 @@ import {
   CavitationOptions,
 } from './../core/boundaryPhase';
 import { WorkerBackend, WorkerHandle } from './workerBackend';
+import { runInteriorStep, runInteriorStepCav } from './../core/kernels';
 
 // Control block indices.
 const PHASE = 0;
@@ -145,6 +151,8 @@ export class ParallelEngine {
   private readonly Bm: Float64Array;
   private readonly ctrl: Int32Array;
   private readonly workers: WorkerHandle[] = [];
+  /** When the pool size is 1, compute the interior stencil inline (no worker spawn / barrier). */
+  private readonly inline: boolean;
   private phase = 0;
   private disposed = false;
 
@@ -172,6 +180,7 @@ export class ParallelEngine {
     const n = model.numPoints;
     this.n = n;
     this.W = Math.max(1, Math.min(numWorkers, n));
+    this.inline = this.W === 1;
     this.cav = cavitation !== undefined;
     this.psi = cavitation?.psi ?? 1;
 
@@ -248,13 +257,38 @@ export class ParallelEngine {
     this.recorder.record(0, this.head.subarray(0, n), this.flow.subarray(0, n), null, null);
     initClosedProtection(model, ss, this.st);
 
-    const chunk = Math.ceil(n / this.W);
-    for (let w = 0; w < this.W; w++) {
-      const lo = w * chunk;
-      const hi = Math.min(n, lo + chunk);
-      const handle = backend.spawn(WORKER_SOURCE);
-      handle.postMessage({ ...shared, lo, hi });
-      this.workers.push(handle);
+    if (!this.inline) {
+      const chunk = Math.ceil(n / this.W);
+      for (let w = 0; w < this.W; w++) {
+        const lo = w * chunk;
+        const hi = Math.min(n, lo + chunk);
+        const handle = backend.spawn(WORKER_SOURCE);
+        handle.postMessage({ ...shared, lo, hi });
+        this.workers.push(handle);
+      }
+    }
+  }
+
+  /** Inline interior stencil (single-worker path): mirrors one full-range worker. */
+  private computeInterior(t0: number, t1: number): void {
+    const n = this.n;
+    const m = this.model;
+    const h0 = this.head.subarray(t0 * n, t0 * n + n);
+    const h1 = this.head.subarray(t1 * n, t1 * n + n);
+    if (this.cav) {
+      const qd0 = this.flow.subarray(t0 * n, t0 * n + n);
+      const qd1 = this.flow.subarray(t1 * n, t1 * n + n);
+      const qu0 = this.qu!.subarray(t0 * n, t0 * n + n);
+      const qu1 = this.qu!.subarray(t1 * n, t1 * n + n);
+      runInteriorStepCav(
+        qd0, qu0, h0, qd1, qu1, h1,
+        m.B, m.R, this.Cp, this.Bp, this.Cm, this.Bm, m.hasPlus, m.hasMinus,
+        this.gasVol!, this.Hgas!, this.C3!, this.timeStep, this.psi,
+      );
+    } else {
+      const q0 = this.flow.subarray(t0 * n, t0 * n + n);
+      const q1 = this.flow.subarray(t1 * n, t1 * n + n);
+      runInteriorStep(q0, h0, q1, h1, m.B, m.R, this.Cp, this.Bp, this.Cm, this.Bm, m.hasPlus, m.hasMinus);
     }
   }
 
@@ -368,9 +402,13 @@ export class ParallelEngine {
   runStep(t: number): void {
     const t1 = t % 2;
     const t0 = 1 - t1;
-    this.dispatch(t0, t1);
-    let v: number;
-    while ((v = Atomics.load(this.ctrl, DONE)) < this.W) Atomics.wait(this.ctrl, DONE, v);
+    if (this.inline) {
+      this.computeInterior(t0, t1);
+    } else {
+      this.dispatch(t0, t1);
+      let v: number;
+      while ((v = Atomics.load(this.ctrl, DONE)) < this.W) Atomics.wait(this.ctrl, DONE, v);
+    }
     this.boundary(t, t0, t1);
   }
 
@@ -378,13 +416,17 @@ export class ParallelEngine {
   async runStepAsync(t: number): Promise<void> {
     const t1 = t % 2;
     const t0 = 1 - t1;
-    this.dispatch(t0, t1);
-    const A = Atomics as AtomicsWithAsync;
-    for (;;) {
-      const v = Atomics.load(this.ctrl, DONE);
-      if (v >= this.W) break;
-      const r = A.waitAsync(this.ctrl, DONE, v);
-      if (r.async) await r.value;
+    if (this.inline) {
+      this.computeInterior(t0, t1);
+    } else {
+      this.dispatch(t0, t1);
+      const A = Atomics as AtomicsWithAsync;
+      for (;;) {
+        const v = Atomics.load(this.ctrl, DONE);
+        if (v >= this.W) break;
+        const r = A.waitAsync(this.ctrl, DONE, v);
+        if (r.async) await r.value;
+      }
     }
     this.boundary(t, t0, t1);
   }
@@ -393,6 +435,7 @@ export class ParallelEngine {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.inline) return;
     Atomics.store(this.ctrl, TERM, 1);
     this.phase++;
     Atomics.store(this.ctrl, PHASE, this.phase);

@@ -6,6 +6,103 @@ import { G } from './types';
 import { EngineModel } from './serialModel';
 import { sign, newton } from './math';
 
+/**
+ * Interior MOC stencil for the inline (single-worker) path. Must stay in sync
+ * with the plain branch of the worker source in `parallel/parallelEngine.ts`.
+ */
+export function runInteriorStep(
+  Q0: Float64Array,
+  H0: Float64Array,
+  Q1: Float64Array,
+  H1: Float64Array,
+  B: Float64Array,
+  R: Float64Array,
+  Cp: Float64Array,
+  Bp: Float64Array,
+  Cm: Float64Array,
+  Bm: Float64Array,
+  hasPlus: Int32Array,
+  hasMinus: Int32Array,
+): void {
+  const n = Q0.length;
+  for (let i = 1; i < n - 1; i++) {
+    Cm[i] = (H0[i + 1] - B[i] * Q0[i + 1]) * hasMinus[i];
+    Bm[i] = (B[i] + R[i] * Math.abs(Q0[i + 1])) * hasMinus[i];
+    Cp[i] = (H0[i - 1] + B[i] * Q0[i - 1]) * hasPlus[i];
+    Bp[i] = (B[i] + R[i] * Math.abs(Q0[i - 1])) * hasPlus[i];
+    H1[i] = (Cp[i] * Bm[i] + Cm[i] * Bp[i]) / (Bp[i] + Bm[i]);
+    Q1[i] = (Cp[i] - Cm[i]) / (Bp[i] + Bm[i]);
+  }
+  Cm[0] = H0[1] - B[0] * Q0[1];
+  Cp[n - 1] = H0[n - 2] + B[n - 2] * Q0[n - 2];
+  Bm[0] = B[0] + R[0] * Math.abs(Q0[1]);
+  Bp[n - 1] = B[n - 2] + R[n - 2] * Math.abs(Q0[n - 2]);
+}
+
+/**
+ * Interior DGCM (column-separation) stencil for the inline path. Two flow faces
+ * (qu/qd), a per-point gas quadratic, and a persistent gas volume. Must stay in
+ * sync with the cavitation branch of the worker source.
+ */
+export function runInteriorStepCav(
+  qd0: Float64Array,
+  qu0: Float64Array,
+  h0: Float64Array,
+  qd1: Float64Array,
+  qu1: Float64Array,
+  h1: Float64Array,
+  B: Float64Array,
+  R: Float64Array,
+  Cp: Float64Array,
+  Bp: Float64Array,
+  Cm: Float64Array,
+  Bm: Float64Array,
+  hasPlus: Int32Array,
+  hasMinus: Int32Array,
+  gasVol: Float64Array,
+  Hgas: Float64Array,
+  C3: Float64Array,
+  dt: number,
+  psi: number,
+): void {
+  const n = h0.length;
+  for (let i = 1; i < n - 1; i++) {
+    const cp = (h0[i - 1] + B[i] * qd0[i - 1]) * hasPlus[i];
+    const bp = (B[i] + R[i] * Math.abs(qd0[i - 1])) * hasPlus[i];
+    const cm = (h0[i + 1] - B[i] * qu0[i + 1]) * hasMinus[i];
+    const bm = (B[i] + R[i] * Math.abs(qu0[i + 1])) * hasMinus[i];
+    Cp[i] = cp;
+    Bp[i] = bp;
+    Cm[i] = cm;
+    Bm[i] = bm;
+    if (hasPlus[i] && hasMinus[i]) {
+      const invBp = 1 / bp;
+      const invBm = 1 / bm;
+      const B1 = invBp + invBm;
+      const K1 = cp * invBp + cm * invBm;
+      const Qc = gasVol[i] + dt * (1 - psi) * (qd0[i] - qu0[i]) - dt * psi * K1;
+      const P = dt * psi * B1;
+      const Hg = Hgas[i];
+      const a = P;
+      const b = Qc - P * Hg;
+      const c = -Qc * Hg - C3[i];
+      let disc = b * b - 4 * a * c;
+      if (disc < 0) disc = 0;
+      const H = (-b + Math.sqrt(disc)) / (2 * a);
+      h1[i] = H;
+      let vol = P * H + Qc;
+      if (vol < 0) vol = 0;
+      gasVol[i] = vol;
+      qd1[i] = (H - cm) * invBm;
+      qu1[i] = (cp - H) * invBp;
+    }
+  }
+  Cm[0] = h0[1] - B[0] * qu0[1];
+  Bm[0] = B[0] + R[0] * Math.abs(qu0[1]);
+  Cp[n - 1] = h0[n - 2] + B[n - 2] * qd0[n - 2];
+  Bp[n - 1] = B[n - 2] + R[n - 2] * Math.abs(qd0[n - 2]);
+}
+
 /** Solve boundary points attached to general junction nodes (and reservoirs/tanks). */
 export function runGeneralJunction(
   H0: Float64Array,

@@ -173,8 +173,14 @@ const sim = await PtsnetSimulation.create({
 Point arrays live in a `SharedArrayBuffer`; each worker owns a contiguous point
 range and reads the shared previous-step columns, so there is **no ghost
 exchange** and results are **independent of the worker count**. Only the cheap
-boundary kernels run on the main thread. Large models scale with cores; tiny
-networks see little benefit (worker/barrier overhead) — use `workers: 1` there.
+boundary kernels run on the main thread.
+
+`workers: 1` (the default on a single-core host) runs the interior stencil
+**inline on the calling thread** — no worker spawn, no per-step barrier — so
+small and medium networks aren't taxed by parallel overhead. Reach for more
+workers on large models, where the per-step interior work dominates the barrier
+cost. (On a 5k-point TNET3, `workers: 1` beats `workers: 4` because the barrier
+overhead outweighs the parallelism; on millions of points the reverse holds.)
 
 #### `run()` vs `runAsync()`
 
