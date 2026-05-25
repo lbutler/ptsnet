@@ -105,8 +105,8 @@ describe('column separation (DGCM) — Bergant reservoir-pipe-valve', () => {
     sim.run();
     const h = sim.results.node.head.get('J1');
     const vaporHead = 0.24 - 10.33;
-    // Without column separation the head either NaNs (sqrt of negative valve head)
-    // or drops far below the vapor head — i.e. unphysical.
+    // Without column separation the head drops far below the vapor head — finite
+    // (the bare engine no longer NaNs at the valve) but unphysical.
     const broken = !h.every(Number.isFinite) || Math.min(...h) < vaporHead - 5;
     expect(broken).toBe(true);
   });

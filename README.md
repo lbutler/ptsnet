@@ -297,6 +297,11 @@ following structural changes were made to fit a JavaScript library:
   shutdown/trip diverges from it (inline pumps already dead-ended, so they
   match). This is why the `single_pump` parity case is replaced by behaviour
   tests in `test/pumpTrip.test.ts`.
+- **Sub-atmospheric end valves.** A single (end) valve discharges to atmosphere
+  via `Q = K0·√(2gH)`, valid only for gauge head `H ≥ 0`. When a down-surge drives
+  it sub-atmospheric the correct boundary condition is no forward flow (`Q = 0`,
+  dead-end reflection); the previous code took `√` of a negative head and produced
+  `NaN`. Positive-head operation is unchanged.
 
 ## Python ↔ JavaScript parity
 
