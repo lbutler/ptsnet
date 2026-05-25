@@ -41,6 +41,10 @@ import {
 } from './../core/boundaryPhase';
 import { WorkerBackend, WorkerHandle } from './workerBackend';
 import { runInteriorStep, runInteriorStepCav } from './../core/kernels';
+import {
+  UnsteadyFrictionOptions,
+  buildUnsteadyFrictionFactors,
+} from './../core/unsteadyFriction';
 
 // Control block indices.
 const PHASE = 0;
@@ -62,6 +66,8 @@ const WORKER_SOURCE = /* js */ `(function () {
     var abs = Math.abs, sqrt = Math.sqrt;
     var iLo = lo < 1 ? 1 : lo, iHi = hi < N - 1 ? hi : N - 1;
     var phase = 0;
+    var uf = d.uf, Ku = uf ? new Float64Array(d.kuSab) : null;
+    function sgn(x) { return x > 0 ? 1 : (x < 0 ? -1 : 0); }
     if (d.cav) {
       var qd = new Float64Array(d.flowSab), qu = new Float64Array(d.quSab);
       var gasVol = new Float64Array(d.gasVolSab), Hgas = new Float64Array(d.hgasSab), C3 = new Float64Array(d.c3Sab);
@@ -80,6 +86,11 @@ const WORKER_SOURCE = /* js */ `(function () {
           var bm = (B[i] + R[i] * abs(qu[dn])) * hasMinus[i];
           Cp[i] = cp; Bp[i] = bp; Cm[i] = cm; Bm[i] = bm;
           if (isInt[i]) {
+            if (uf) {
+              var kB = Ku[i], q = qd[o0 + i];
+              var e = kB * (sgn(q) * abs(qd[dn] - qd[up]) * 0.5 - q);
+              cp -= e; cm += e; bp += kB; bm += kB;
+            }
             var invBp = 1 / bp, invBm = 1 / bm;
             var B1 = invBp + invBm, K1 = cp * invBp + cm * invBm;
             var Qc = gasVol[i] + dt * (1 - psi) * (qd[o0 + i] - qu[o0 + i]) - dt * psi * K1;
@@ -112,6 +123,11 @@ const WORKER_SOURCE = /* js */ `(function () {
           var cp = (head[up] + B[i] * flow[up]) * hasPlus[i];
           var bp = (B[i] + R[i] * abs(flow[up])) * hasPlus[i];
           Cm[i] = cm; Bm[i] = bm; Cp[i] = cp; Bp[i] = bp;
+          if (uf) {
+            var kB = Ku[i], q = flow[o0 + i];
+            var e = kB * (sgn(q) * abs(flow[dn] - flow[up]) * 0.5 - q);
+            cp -= e; cm += e; bp += kB; bm += kB;
+          }
           head[o1 + i] = (cp * bm + cm * bp) / (bp + bm);
           flow[o1 + i] = (cp - cm) / (bp + bm);
         }
@@ -166,6 +182,10 @@ export class ParallelEngine {
   private phase = 0;
   private disposed = false;
 
+  // Unsteady (Brunone) friction, present only when enabled.
+  private readonly uf: boolean;
+  private readonly Ku?: Float64Array; // per-point k·B factor
+
   // Column separation (DGCM) state, present only when cavitating.
   private readonly cav: boolean;
   private readonly qu?: Float64Array; // length 2N (upstream face)
@@ -198,6 +218,7 @@ export class ParallelEngine {
     recording: RecordingOptions = {},
     cavitation?: CavitationOptions,
     private readonly pumpTrip?: PumpTripState,
+    unsteadyFriction?: UnsteadyFrictionOptions,
   ) {
     const n = model.numPoints;
     this.n = n;
@@ -205,6 +226,7 @@ export class ParallelEngine {
     this.inline = this.W === 1;
     this.cav = cavitation !== undefined;
     this.psi = cavitation?.psi ?? 1;
+    this.uf = unsteadyFriction !== undefined;
 
     const flow = f64(2 * n);
     const head = f64(2 * n);
@@ -233,6 +255,13 @@ export class ParallelEngine {
     flow.arr.set(model.initFlow, 0);
     head.arr.set(model.initHead, 0);
 
+    let ku: { sab: SharedArrayBuffer; arr: Float64Array } | undefined;
+    if (this.uf) {
+      ku = f64(n);
+      ku.arr.set(buildUnsteadyFrictionFactors(ss, model, unsteadyFriction!));
+      this.Ku = ku.arr;
+    }
+
     const shared: Record<string, unknown> = {
       flowSab: flow.sab,
       headSab: head.sab,
@@ -248,6 +277,8 @@ export class ParallelEngine {
       N: n,
       W: this.W,
       cav: this.cav,
+      uf: this.uf,
+      kuSab: ku?.sab,
     };
 
     if (cavitation) {
@@ -316,12 +347,12 @@ export class ParallelEngine {
       runInteriorStepCav(
         qd0, qu0, h0, qd1, qu1, h1,
         m.B, m.R, this.Cp, this.Bp, this.Cm, this.Bm, m.hasPlus, m.hasMinus,
-        this.gasVol!, this.Hgas!, this.C3!, this.timeStep, this.psi,
+        this.gasVol!, this.Hgas!, this.C3!, this.timeStep, this.psi, this.Ku,
       );
     } else {
       const q0 = this.flow.subarray(t0 * n, t0 * n + n);
       const q1 = this.flow.subarray(t1 * n, t1 * n + n);
-      runInteriorStep(q0, h0, q1, h1, m.B, m.R, this.Cp, this.Bp, this.Cm, this.Bm, m.hasPlus, m.hasMinus);
+      runInteriorStep(q0, h0, q1, h1, m.B, m.R, this.Cp, this.Bp, this.Cm, this.Bm, m.hasPlus, m.hasMinus, this.Ku);
     }
   }
 
