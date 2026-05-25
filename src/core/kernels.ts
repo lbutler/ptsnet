@@ -255,8 +255,19 @@ export function runValveStep(
     const K0 = setting[v] * coeff[v] * area[v];
     const K = 2 * G * (Bp[pt] * K0) ** 2;
     const cpEnd = Cp[pt];
-    H1[pt] = (2 * cpEnd + K - Math.sqrt((2 * cpEnd + K) ** 2 - 4 * cpEnd ** 2)) / 2;
-    Q1[pt] = K0 * Math.sqrt(2 * G * H1[pt]);
+    if (cpEnd > 0) {
+      // Free discharge to atmosphere: H = Cp − Bp·Q and Q = K0·√(2gH), with the
+      // forward-flow solution H ∈ [0, Cp].
+      H1[pt] = (2 * cpEnd + K - Math.sqrt((2 * cpEnd + K) ** 2 - 4 * cpEnd ** 2)) / 2;
+      Q1[pt] = K0 * Math.sqrt(2 * G * H1[pt]);
+    } else {
+      // Sub-atmospheric driving head: a discharge valve can't pass forward flow
+      // (Q=0), so the valve point reflects as a dead end (H = Cp). Without
+      // column-separation modelling H may then fall below vapor pressure — the
+      // documented bare-engine limitation — but it stays finite (no NaN).
+      H1[pt] = cpEnd;
+      Q1[pt] = 0;
+    }
   }
 
   for (let i = 0; i < m.startValveCtx.length; i++) {
