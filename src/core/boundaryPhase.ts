@@ -13,6 +13,7 @@ import {
   runCheckValves,
   runValveStep,
   runPumpStep,
+  runPumpTrip,
   runOpenProtections,
   runClosedProtections,
 } from './kernels';
@@ -93,6 +94,17 @@ function applyValveGasCavities(
   }
 }
 
+/**
+ * Per-pump trip configuration (constants built once at engine init). `tripStep`
+ * is the step at which power fails (−1 = no trip); `K = ρg/(η I ω_R²)` sizes the
+ * speed-decay ODE. Both are indexed by pump index and length `pump.n`. The speed
+ * ratio itself lives in `ss.pump.setting`, written each step by {@link runPumpTrip}.
+ */
+export interface PumpTripState {
+  tripStep: Int32Array;
+  K: Float64Array;
+}
+
 /** Main-thread scratch + persistent state for the boundary kernels. */
 export interface BoundaryState {
   E1: Float64Array;
@@ -152,6 +164,7 @@ export function runBoundaryPhase(
   Cm: Float64Array,
   Bm: Float64Array,
   cav?: CavState,
+  pumpTrip?: PumpTripState,
 ): void {
   if (model.numResultNodes > 0) {
     runGeneralJunction(
@@ -192,6 +205,9 @@ export function runBoundaryPhase(
     ss.pump.setting,
     model,
   );
+  if (pumpTrip) {
+    runPumpTrip(t, timeStep, ss.pump.setting, ss.pump.a1, ss.pump.a2, ss.pump.Hs, Q1, H1, model, pumpTrip);
+  }
 
   if (model.openStart.length > 0) {
     runOpenProtections(H0, H1, Q1, Cp, Bp, Cm, Bm, st.openQT, model, timeStep);

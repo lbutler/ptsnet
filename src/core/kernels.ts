@@ -5,7 +5,7 @@
 import { G } from './types';
 import { EngineModel } from './serialModel';
 import { sign, newton } from './math';
-import type { CavState } from './boundaryPhase';
+import type { CavState, PumpTripState } from './boundaryPhase';
 
 /**
  * Interior MOC stencil for the inline (single-worker) path. Must stay in sync
@@ -292,16 +292,12 @@ export function runPumpStep(
   setting: Float64Array,
   m: EngineModel,
 ): void {
+  // Raw quadratic root (may be negative: the pump would pass reverse flow).
   const solveQ = (A: number, Bc: number, C: number): number => {
-    if (Math.abs(A) < 1e-30) {
-      // Degenerate (under-determined) pump fit: fall back to a linear root.
-      let q = Bc !== 0 ? -C / Bc : 0;
-      return q < 0 ? 0 : q;
-    }
+    if (Math.abs(A) < 1e-30) return Bc !== 0 ? -C / Bc : 0;
     let root = Bc * Bc - 4 * A * C;
     if (root < 0) root = 0;
-    let q = (-Bc - Math.sqrt(root)) / (2 * A);
-    return q < 0 ? 0 : q;
+    return (-Bc - Math.sqrt(root)) / (2 * A);
   };
 
   for (let i = 0; i < m.singlePumpCtx.length; i++) {
@@ -315,9 +311,15 @@ export function runPumpStep(
     const Bc = a1[pp] * alpha - BM;
     const C = Hs[pp] * alpha ** 2 - CM + CP;
     const Q = solveQ(A, Bc, C);
-    Q1[pt] = Q;
-    const hp = a2[pp] * Q * Q + a1[pp] * alpha * Q + Hs[pp] * alpha ** 2;
-    H1[pt] = CP + hp;
+    if (Q < 0) {
+      // Forward-only pump (EPANET semantics): discharge check valve shut,
+      // downstream reflects as a dead end. (Q == 0 is deadhead: shutoff head.)
+      Q1[pt] = 0;
+      H1[pt] = CM;
+    } else {
+      Q1[pt] = Q;
+      H1[pt] = CP + (a2[pp] * Q * Q + a1[pp] * alpha * Q + Hs[pp] * alpha ** 2);
+    }
   }
 
   for (let i = 0; i < m.startPumpCtx.length; i++) {
@@ -332,13 +334,61 @@ export function runPumpStep(
     const A = a2[pp];
     const Bc = a1[pp] * alpha - BM - BP;
     const C = Hs[pp] * alpha ** 2 - CM + CP;
-    const Q = solveQ(A, Bc, C);
+    // Forward-only: a negative root reflects both sides as dead ends (Q = 0).
+    const Q = Math.max(0, solveQ(A, Bc, C));
     Q1[j] = Q;
     Q1[k] = Q;
     H1[j] = CP - BP * Q;
     // funcs.py computes H1[k] = H1[j] + pump head then overwrites with the
     // characteristic value below; only the latter survives.
     H1[k] = CM + BM * Q;
+  }
+}
+
+/**
+ * Pump trip (power failure) with rotational inertia. After the trip step the
+ * pump speed ratio α (= `setting`) is no longer scheduled but decays from the
+ * rotating mass: with hydraulic braking torque `T_h = ρ g Q hp / (η ω)` and
+ * `ω = α ω_R`, the angular-momentum balance `I dω/dt = −T_h` gives
+ *   dα/dt = −K · Q · hp / α,   K = ρ g / (η I ω_R²).
+ * Integrated explicitly here (one-step lag) using this step's pump flow Q and
+ * head rise hp from {@link runPumpStep}; α is written back for the next step.
+ * When the discharge check valve is shut (Q = 0) the term vanishes and α freezes.
+ * Forward-quadrant only (Wylie & Streeter / Chaudhry pump rundown).
+ */
+export function runPumpTrip(
+  t: number,
+  dt: number,
+  setting: Float64Array,
+  a1: Float64Array,
+  a2: Float64Array,
+  Hs: Float64Array,
+  Q1: Float64Array,
+  H1: Float64Array,
+  m: EngineModel,
+  trip: PumpTripState,
+): void {
+  const ALPHA_MIN = 1e-3;
+  const advance = (pp: number, Q: number, hp: number): void => {
+    const alpha = setting[pp];
+    let next = alpha - (dt * trip.K[pp] * Q * hp) / Math.max(alpha, ALPHA_MIN);
+    if (next < 0) next = 0;
+    setting[pp] = next;
+  };
+  for (let i = 0; i < m.singlePumpCtx.length; i++) {
+    const pp = m.singlePumpCtx[i];
+    if (trip.tripStep[pp] < 0 || t < trip.tripStep[pp]) continue;
+    const pt = m.singlePumpPoints[i];
+    const Q = Q1[pt];
+    const alpha = setting[pp];
+    advance(pp, Q, a2[pp] * Q * Q + a1[pp] * alpha * Q + Hs[pp] * alpha ** 2);
+  }
+  for (let i = 0; i < m.startPumpCtx.length; i++) {
+    const pp = m.startPumpCtx[i];
+    if (trip.tripStep[pp] < 0 || t < trip.tripStep[pp]) continue;
+    const j = m.startPumpPoints[i];
+    const k = m.endPumpPoints[i];
+    advance(pp, Q1[j], H1[k] - H1[j]); // H1[k]-H1[j] is the pump head rise
   }
 }
 

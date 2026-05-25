@@ -297,11 +297,18 @@ const TOL: Record<string, { head: number; flow: number }> = {
   single_valve: { head: 1e-4, flow: 1e-6 },
 };
 
+// NOTE: 'single_pump' is intentionally NOT in this list. Pumps are now
+// forward-only and isolate on flow reversal (a discharge check valve, matching
+// EPANET pump semantics). The Python reference instead held the shutoff head
+// when a single pump's flow reversed, so it diverges (~34 m) once the pumped
+// lift can no longer be sustained. Inline pumps already dead-ended correctly, so
+// 'tnet3_pump' still matches Python. The corrected single-pump shutdown/trip
+// behaviour is covered by test/pumpTrip.test.ts. See README "Differences".
 const SCENARIOS = [
   'simple', 'hammer', 'tnet3', 'tnet3_pump', 'tnet3_burst',
   'hammer_custom', 'simple_demand', 'surge_open', 'surge_closed',
   'loop', 'b0', 'b0_0', 'pipe_series', 'crit_critical', 'crit_dt',
-  'single_pump', 'single_valve',
+  'single_valve',
 ];
 
 describe.skipIf(!hasRef)('Python <-> JavaScript parity', () => {

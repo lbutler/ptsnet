@@ -72,6 +72,7 @@ const sim = await PtsnetSimulation.create({ inp: readFileSync('net.inp', 'utf8')
 ```ts
 sim.defineValveOperation(names, { initialSetting, finalSetting, startTime, endTime });
 sim.definePumpOperation(names, { initialSetting, finalSetting, startTime, endTime });
+sim.definePumpTrip(pumpName, { tripTime, inertia, ratedSpeed, ratedEfficiency }); // power failure: speed coasts down on inertia
 sim.addBurst(nodeNames, burstCoeff, startTime, endTime);
 sim.addSurgeProtection(nodeName, 'open',   tankArea);
 sim.addSurgeProtection(nodeName, 'closed', tankArea, tankHeight, waterLevel);
@@ -288,6 +289,13 @@ following structural changes were made to fit a JavaScript library:
   persists that state, which is the physically intended behaviour. As a result,
   models that use surge-protection devices will differ from the Python output
   (by design); everything else matches.
+- **Pumps are forward-only (discharge check valve).** Like EPANET, a pump never
+  passes reverse flow: when the lift can no longer be sustained the pump isolates
+  (the downstream reflects as a dead end) instead of holding its shutoff head.
+  The Python reference held shutoff head on reversal, so a *single* pump's
+  shutdown/trip diverges from it (inline pumps already dead-ended, so they
+  match). This is why the `single_pump` parity case is replaced by behaviour
+  tests in `test/pumpTrip.test.ts`.
 
 ## Python ↔ JavaScript parity
 
