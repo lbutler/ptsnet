@@ -385,6 +385,7 @@ export async function loadInitialConditions(
       closedProtection: new Map(),
       airValve: new Map(),
       surgeReliefValve: new Map(),
+      oneWaySurgeTank: new Map(),
       linksForNode,
     };
 

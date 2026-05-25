@@ -473,6 +473,111 @@ export function runOpenProtections(
   }
 }
 
+/**
+ * One-way surge tank at a degree-2 node: an open tank connected through a check
+ * valve. Runs after {@link runGeneralJunction} (which normalizes the boundary
+ * characteristics). Sign convention matches {@link runOpenProtections}:
+ * `QT = Q1[s] − Q1[e]` is net flow *into* the tank, so feeding the line ⇒ QT < 0.
+ *
+ * Each step, with `CC = Cp[s]+Cm[e]`, `BB = Bp[s]+Bm[e]`, `hJunc = CC/BB`:
+ *  1. While the tank holds water (`z0 > zBot`) try the open-tank elastic solve on
+ *     the *tracked* level `z0` (not the node head, which decouples when shut):
+ *     `H = (CC + qt0 + 2aT/dt·z0)/(BB + 2aT/dt)`, `QT = CC − H·BB`. If `QT ≤ 0` the
+ *     check valve passes — the tank feeds the line, node head is pinned to the
+ *     (falling) tank level — so accept it and drop the level (clamped at `zBot`).
+ *  2. Otherwise the check valve is shut. With a refill orifice (`Kr > 0`) and the
+ *     line head above the tank level the tank refills slowly (line → tank):
+ *     `CC − H·BB = Kr·√(H − z0)` (same Citardauq form as {@link runSrv}), level
+ *     rising (clamped at the "full" level `zFull`). With no refill it's a plain
+ *     transparent series junction. The tank thus caps the down-surge but lets the
+ *     up-surge pass — unlike a plain open tank, which damps both.
+ *
+ * State (`owtZ` level, `owtQT` previous inflow) persists across steps. The tank's
+ * boundary points are mirrored onto the `qu` face by the generic cavitation
+ * sync (like the open/closed surge tanks), so no `cav` argument is needed.
+ *
+ * Reference: Wylie & Streeter, *Fluid Transients in Systems*; Chaudhry, *Applied
+ * Hydraulic Transients* (one-way / feed surge tanks).
+ */
+export function runOneWayTanks(
+  H1: Float64Array,
+  Q1: Float64Array,
+  Cp: Float64Array,
+  Bp: Float64Array,
+  Cm: Float64Array,
+  Bm: Float64Array,
+  owtZ: Float64Array,
+  owtQT: Float64Array,
+  m: EngineModel,
+  dt: number,
+): void {
+  for (let i = 0; i < m.owtStart.length; i++) {
+    const s = m.owtStart[i];
+    const e = m.owtEnd[i];
+    const CP = Cp[s];
+    const BP = Bp[s];
+    const CM = Cm[e];
+    const BM = Bm[e];
+    const CC = CP + CM;
+    const BB = BP + BM;
+    const aT = m.owtArea[i];
+    const zBot = m.owtBottom[i];
+    const zFull = m.owtInitLevel[i];
+    const Kr = m.owtKr[i];
+    const z0 = owtZ[i];
+    const qt0 = owtQT[i];
+    const hJunc = CC / BB;
+
+    // Discharge attempt (only while the tank holds water).
+    let H = hJunc;
+    let QT = 1; // positive sentinel ⇒ "not discharging"
+    if (z0 > zBot) {
+      H = (CC + qt0 + (2 * aT * z0) / dt) / (BB + (2 * aT) / dt);
+      QT = CC - H * BB;
+    }
+
+    if (QT <= 0) {
+      // Check valve open: the tank feeds the line (node head == new tank level).
+      let zNew = z0 + (dt / (2 * aT)) * (QT + qt0);
+      if (zNew < zBot) zNew = zBot;
+      H1[s] = H;
+      H1[e] = H;
+      Q1[s] = CP - H * BP;
+      Q1[e] = H * BM - CM;
+      owtZ[i] = zNew;
+      owtQT[i] = QT;
+    } else if (Kr > 0 && hJunc > z0 && z0 < zFull) {
+      // Check valve shut; slow refill (line → tank) through the throttle orifice.
+      const c = CC - z0 * BB; // = BB·(hJunc − z0) > 0
+      let disc = Kr * Kr + 4 * BB * c;
+      if (disc < 0) disc = 0;
+      const x = (2 * c) / (Kr + Math.sqrt(disc));
+      let qIn = Kr * x; // > 0 (into tank)
+      let zNew = z0 + (dt * qIn) / aT; // backward Euler (refill is slow)
+      if (zNew > zFull) {
+        zNew = zFull;
+        qIn = (aT * (zFull - z0)) / dt;
+        H = (CC - qIn) / BB;
+      } else {
+        H = z0 + x * x;
+      }
+      H1[s] = H;
+      H1[e] = H;
+      Q1[s] = CP - H * BP;
+      Q1[e] = H * BM - CM;
+      owtZ[i] = zNew;
+      owtQT[i] = 0; // discharge trapezoid memory reset (refill used backward Euler)
+    } else {
+      // Check valve shut, no refill: transparent series junction; level frozen.
+      H1[s] = hJunc;
+      H1[e] = hJunc;
+      Q1[s] = CP - hJunc * BP;
+      Q1[e] = hJunc * BM - CM;
+      owtQT[i] = 0;
+    }
+  }
+}
+
 const HB = 10.3; // barometric pressure [m H2O]
 const GAS_EXP = 1.2; // polytropic gas exponent
 

@@ -454,7 +454,11 @@ export class PtsnetSimulation {
     const node = this.ss.node;
     const nodeId = node.index.get(nodeName);
     if (nodeId === undefined) throw new Error(`unknown node '${nodeName}'`);
-    if (this.ss.openProtection.has(nodeName) || this.ss.closedProtection.has(nodeName)) {
+    if (
+      this.ss.openProtection.has(nodeName) ||
+      this.ss.closedProtection.has(nodeName) ||
+      this.ss.oneWaySurgeTank.has(nodeName)
+    ) {
       throw new Error(`node '${nodeName}' already has a surge protection`);
     }
 
@@ -497,6 +501,7 @@ export class PtsnetSimulation {
     const nodeId = node.index.get(nodeName);
     if (nodeId === undefined) throw new Error(`unknown node '${nodeName}'`);
     if (this.ss.airValve.has(nodeName)) throw new Error(`node '${nodeName}' already has an air valve`);
+    if (this.ss.oneWaySurgeTank.has(nodeName)) throw new Error(`node '${nodeName}' already has a degree-2 boundary element`);
     if (!(options.inflowArea > 0)) throw new Error('air valve requires inflowArea > 0');
     const onNonPipe = [
       ...this.ss.pump.startNode,
@@ -545,7 +550,8 @@ export class PtsnetSimulation {
       this.ss.surgeReliefValve.has(nodeName) ||
       this.ss.airValve.has(nodeName) ||
       this.ss.openProtection.has(nodeName) ||
-      this.ss.closedProtection.has(nodeName)
+      this.ss.closedProtection.has(nodeName) ||
+      this.ss.oneWaySurgeTank.has(nodeName)
     ) {
       throw new Error(`node '${nodeName}' already has a degree-2 boundary element`);
     }
@@ -574,6 +580,68 @@ export class PtsnetSimulation {
       coeff: options.dischargeCoeff ?? 0.6,
       openTime,
       closeTime,
+    });
+  }
+
+  /**
+   * Install a one-way surge tank at a node between two pipes: an open tank
+   * connected through a check valve. It feeds the line whenever the local head
+   * drops below the tank water level — capping the down-surge at roughly the tank
+   * level (limiting/avoiding column separation) — while the check valve stays shut
+   * on the up-surge, which passes through (unlike a plain open surge tank, which
+   * damps both directions). The tank drains as it feeds and stops once it reaches
+   * `bottomLevel`; with `refillArea > 0` it refills slowly through a throttle
+   * orifice (line → tank) once the head recovers, up to `initialLevel`.
+   *
+   * `initialLevel` defaults to the steady-state node head (so the tank starts level
+   * with the line and the steady state is undisturbed) and `bottomLevel` to the
+   * node elevation. All levels are HGL in metres; areas in m².
+   */
+  addOneWaySurgeTank(
+    nodeName: string,
+    options: {
+      tankArea: number;
+      initialLevel?: number;
+      bottomLevel?: number;
+      refillArea?: number;
+      refillCoeff?: number;
+    },
+  ): void {
+    const node = this.ss.node;
+    const nodeId = node.index.get(nodeName);
+    if (nodeId === undefined) throw new Error(`unknown node '${nodeName}'`);
+    if (
+      this.ss.oneWaySurgeTank.has(nodeName) ||
+      this.ss.surgeReliefValve.has(nodeName) ||
+      this.ss.airValve.has(nodeName) ||
+      this.ss.openProtection.has(nodeName) ||
+      this.ss.closedProtection.has(nodeName)
+    ) {
+      throw new Error(`node '${nodeName}' already has a degree-2 boundary element`);
+    }
+    if (!(options.tankArea > 0)) throw new Error('one-way surge tank requires tankArea > 0');
+    const initialLevel = options.initialLevel ?? node.head[nodeId];
+    const bottomLevel = options.bottomLevel ?? node.elevation[nodeId];
+    if (!(bottomLevel < initialLevel)) throw new Error('one-way surge tank requires bottomLevel < initialLevel');
+    const refillArea = options.refillArea ?? 0;
+    if (!(refillArea >= 0)) throw new Error('one-way surge tank refillArea must be >= 0');
+    const onNonPipe = [
+      ...this.ss.pump.startNode,
+      ...this.ss.pump.endNode,
+      ...this.ss.valve.startNode,
+      ...this.ss.valve.endNode,
+    ].includes(nodeId);
+    if (node.degree[nodeId] !== 2 || onNonPipe) {
+      throw new Error(`node '${nodeName}' is not between two pipes`);
+    }
+    this.ss.oneWaySurgeTank.set(nodeName, {
+      label: nodeName,
+      node: nodeId,
+      area: options.tankArea,
+      initialLevel,
+      bottomLevel,
+      refillArea,
+      refillCoeff: options.refillCoeff ?? 0.6,
     });
   }
 

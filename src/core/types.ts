@@ -105,6 +105,22 @@ export interface ClosedProtection {
   waterLevel: number;
 }
 
+/**
+ * A one-way surge tank at a degree-2 node: an open tank connected through a check
+ * valve. It feeds the line only when the local head drops below the tank water
+ * level (down-surge protection); the check valve stays shut on the up-surge so it
+ * passes through. The tank drains as it feeds and optionally refills slowly.
+ */
+export interface OneWaySurgeTank {
+  label: string;
+  node: number;
+  area: number; // tank cross-section [m²]
+  initialLevel: number; // water-surface HGL at t=0 (also the refill "full" cap) [m]
+  bottomLevel: number; // empty level: at/below it the tank stops feeding [m]
+  refillArea: number; // refill-orifice area [m²] (0 = no refill)
+  refillCoeff: number; // refill discharge coefficient
+}
+
 /** A combination air/vacuum valve at a node: admits air on vacuum, expels on pressurization. */
 export interface AirValve {
   label: string;
@@ -137,6 +153,7 @@ export interface SteadyState {
   closedProtection: Map<string, ClosedProtection>;
   airValve: Map<string, AirValve>;
   surgeReliefValve: Map<string, SurgeReliefValve>;
+  oneWaySurgeTank: Map<string, OneWaySurgeTank>;
   /** Adjacency: link names touching each node (by node index). */
   linksForNode: string[][];
 }
