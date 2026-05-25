@@ -4,10 +4,11 @@
  * TypeScript port of PTSNET. Initial (steady-state) conditions are obtained via
  * epanet-js; the transient solution is computed by a serial MOC engine.
  */
-export { PtsnetSimulation } from './core/simulation';
+export { PtsnetSimulation, VALVE_CURVES } from './core/simulation';
 export type {
   SimulationCreateOptions,
   ValveOperationOptions,
+  ValveCharacteristic,
   PumpOperationOptions,
   PumpTripOptions,
   OpenSurgeTankOptions,

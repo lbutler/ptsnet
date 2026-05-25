@@ -70,7 +70,10 @@ const sim = await PtsnetSimulation.create({ inp: readFileSync('net.inp', 'utf8')
 ### Operations
 
 ```ts
-sim.defineValveOperation(names, { initialSetting, finalSetting, startTime, endTime });
+sim.defineValveOperation(names, { initialSetting, finalSetting, startTime, endTime, valveType });
+                             // valveType: butterfly (default) | globe | gate | ball | needle —
+                             // built-in inherent characteristic curves (relative Cv vs % open)
+
 sim.definePumpOperation(names, { initialSetting, finalSetting, startTime, endTime });
 sim.definePumpTrip(pumpName, { tripTime, inertia, ratedSpeed, ratedEfficiency }); // power failure: speed coasts down on inertia
 sim.addBurst(nodeNames, burstCoeff, startTime, endTime);
