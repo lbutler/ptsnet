@@ -1,6 +1,6 @@
 {
   "name": "@epanet-js/ptsnet",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Transient simulation in water networks (Method of Characteristics) — TypeScript port of PTSNET",
   "type": "module",
   "main": "./dist/ptsnet.cjs",
