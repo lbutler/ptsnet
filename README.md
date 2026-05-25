@@ -79,6 +79,9 @@ sim.addSurgeProtection(nodeName, 'closed', tankArea, tankHeight, waterLevel);
 sim.addCheckValve(pipeName); // forward-flow-only pipe; shuts on reversal (no backflow).
                              // EPANET CV-status pipes are honored automatically.
 sim.addAirValve(nodeName, { inflowArea, outflowArea }); // combination air/vacuum valve at a high point
+sim.addSurgeReliefValve(nodeName, { setpoint, area, openTime, closeTime, reseat });
+                             // pressure-relief valve: opens above the gauge-head setpoint,
+                             // vents to atmosphere, recloses below reseat (defaults to setpoint)
 ```
 
 Column separation and unsteady friction are `create` options, not operations:

@@ -519,6 +519,65 @@ export class PtsnetSimulation {
   }
 
   /**
+   * Install a surge-relief valve at a node between two pipes. It stays shut until
+   * the node gauge head (`H − elevation`) rises above `setpoint`, then opens —
+   * over `openTime` seconds — to discharge to atmosphere through an orifice of
+   * `area` m², capping the upsurge; it recloses over `closeTime` once the head
+   * falls below `reseat` (defaults to `setpoint`; set it lower for blowdown
+   * hysteresis that avoids chatter). Times default to 0 (instant). `setpoint`,
+   * `reseat`, and `area` are in SI (m, m, m²).
+   */
+  addSurgeReliefValve(
+    nodeName: string,
+    options: {
+      setpoint: number;
+      area: number;
+      dischargeCoeff?: number;
+      openTime?: number;
+      closeTime?: number;
+      reseat?: number;
+    },
+  ): void {
+    const node = this.ss.node;
+    const nodeId = node.index.get(nodeName);
+    if (nodeId === undefined) throw new Error(`unknown node '${nodeName}'`);
+    if (
+      this.ss.surgeReliefValve.has(nodeName) ||
+      this.ss.airValve.has(nodeName) ||
+      this.ss.openProtection.has(nodeName) ||
+      this.ss.closedProtection.has(nodeName)
+    ) {
+      throw new Error(`node '${nodeName}' already has a degree-2 boundary element`);
+    }
+    if (!(options.area > 0)) throw new Error('surge-relief valve requires area > 0');
+    if (!Number.isFinite(options.setpoint)) throw new Error('surge-relief valve requires a finite setpoint');
+    const openTime = options.openTime ?? 0;
+    const closeTime = options.closeTime ?? 0;
+    if (!(openTime >= 0) || !(closeTime >= 0)) throw new Error('surge-relief valve openTime/closeTime must be >= 0');
+    const reseat = options.reseat ?? options.setpoint;
+    if (reseat > options.setpoint) throw new Error('surge-relief valve reseat must be <= setpoint');
+    const onNonPipe = [
+      ...this.ss.pump.startNode,
+      ...this.ss.pump.endNode,
+      ...this.ss.valve.startNode,
+      ...this.ss.valve.endNode,
+    ].includes(nodeId);
+    if (node.degree[nodeId] !== 2 || onNonPipe) {
+      throw new Error(`node '${nodeName}' is not between two pipes`);
+    }
+    this.ss.surgeReliefValve.set(nodeName, {
+      label: nodeName,
+      node: nodeId,
+      setpoint: options.setpoint,
+      reseat,
+      area: options.area,
+      coeff: options.dischargeCoeff ?? 0.6,
+      openTime,
+      closeTime,
+    });
+  }
+
+  /**
    * Mark a pipe as carrying an (ideal) check valve: it passes flow in the
    * steady-state direction and shuts the instant flow reverses, preventing
    * backflow (e.g. on the down-surge after a downstream valve closure or, later,

@@ -17,6 +17,7 @@ import {
   runOpenProtections,
   runClosedProtections,
   runAirValves,
+  runSrv,
 } from './kernels';
 
 const HB = 10.3;
@@ -120,6 +121,7 @@ export interface BoundaryState {
   closedC: Float64Array;
   airVol: Float64Array; // air-valve pocket volume [m³] (0 = shut)
   airMass: Float64Array; // air-valve pocket air mass [kg]
+  srvTau: Float64Array; // surge-relief-valve opening fraction [0,1] (0 = shut)
 }
 
 export function makeBoundaryState(model: EngineModel): BoundaryState {
@@ -136,6 +138,7 @@ export function makeBoundaryState(model: EngineModel): BoundaryState {
     closedC: new Float64Array(model.closedStart.length),
     airVol: new Float64Array(model.airStart.length),
     airMass: new Float64Array(model.airStart.length),
+    srvTau: new Float64Array(model.srvStart.length),
   };
 }
 
@@ -235,6 +238,9 @@ export function runBoundaryPhase(
   }
   if (model.airStart.length > 0) {
     runAirValves(H1, Q1, Cp, Bp, Cm, Bm, st.airVol, st.airMass, ss.node.elevation, model, timeStep);
+  }
+  if (model.srvStart.length > 0) {
+    runSrv(H1, Q1, Cp, Bp, Cm, Bm, st.srvTau, ss.node.elevation, model, timeStep, cav);
   }
 
   if (cav) {

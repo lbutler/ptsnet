@@ -115,6 +115,18 @@ export interface AirValve {
   outCoeff: number; // outlet discharge coefficient
 }
 
+/** A pressure-relief valve at a degree-2 node: opens on overpressure, vents to atmosphere. */
+export interface SurgeReliefValve {
+  label: string;
+  node: number;
+  setpoint: number; // open above this gauge head [m]
+  reseat: number; // reclose below this gauge head [m] (≤ setpoint)
+  area: number; // orifice area [m²]
+  coeff: number; // discharge coefficient
+  openTime: number; // seconds to ramp shut→open (0 = instant)
+  closeTime: number; // seconds to ramp open→shut (0 = instant)
+}
+
 /** The complete steady-state model produced from the EPANET solve. */
 export interface SteadyState {
   node: NodeTable;
@@ -124,6 +136,7 @@ export interface SteadyState {
   openProtection: Map<string, OpenProtection>;
   closedProtection: Map<string, ClosedProtection>;
   airValve: Map<string, AirValve>;
+  surgeReliefValve: Map<string, SurgeReliefValve>;
   /** Adjacency: link names touching each node (by node index). */
   linksForNode: string[][];
 }

@@ -75,6 +75,15 @@ export interface EngineModel {
   airOutArea: Float64Array;
   airInCoeff: Float64Array;
   airOutCoeff: Float64Array;
+  // Surge-relief valves (degree-2 node; start has C+, end has C-) + relief params + node.
+  srvStart: Int32Array;
+  srvEnd: Int32Array;
+  srvNode: Int32Array;
+  srvKq: Float64Array; // discharge factor coeff·area·√(2g)
+  srvSetpoint: Float64Array;
+  srvReseat: Float64Array;
+  srvOpenTime: Float64Array;
+  srvCloseTime: Float64Array;
 }
 
 interface BoundaryRef {
@@ -345,6 +354,7 @@ export function buildEngineModel(
   const surgeNode = new Set<number>();
   for (const prot of ss.openProtection.values()) surgeNode.add(prot.node);
   for (const prot of ss.closedProtection.values()) surgeNode.add(prot.node);
+  for (const srv of ss.surgeReliefValve.values()) surgeNode.add(srv.node);
 
   const placeCheck = (n: number): boolean => {
     if (
@@ -400,6 +410,31 @@ export function buildEngineModel(
     }
   }
 
+  // --- Surge-relief valves (pressure-relief orifice at a degree-2 node). ---
+  const srvStart: number[] = [];
+  const srvEnd: number[] = [];
+  const srvNode: number[] = [];
+  const srvKq: number[] = [];
+  const srvSetpoint: number[] = [];
+  const srvReseat: number[] = [];
+  const srvOpenTime: number[] = [];
+  const srvCloseTime: number[] = [];
+  for (const srv of ss.surgeReliefValve.values()) {
+    const refs = boundaryAtNode[srv.node];
+    const u = refs.find((r) => r.isU);
+    const d = refs.find((r) => !r.isU);
+    if (u && d) {
+      srvStart.push(u.point);
+      srvEnd.push(d.point);
+      srvNode.push(srv.node);
+      srvKq.push(srv.coeff * srv.area * Math.sqrt(2 * G));
+      srvSetpoint.push(srv.setpoint);
+      srvReseat.push(srv.reseat);
+      srvOpenTime.push(srv.openTime);
+      srvCloseTime.push(srv.closeTime);
+    }
+  }
+
   return {
     numPoints,
     B,
@@ -450,5 +485,13 @@ export function buildEngineModel(
     airOutArea: Float64Array.from(airOutArea),
     airInCoeff: Float64Array.from(airInCoeff),
     airOutCoeff: Float64Array.from(airOutCoeff),
+    srvStart: Int32Array.from(srvStart),
+    srvEnd: Int32Array.from(srvEnd),
+    srvNode: Int32Array.from(srvNode),
+    srvKq: Float64Array.from(srvKq),
+    srvSetpoint: Float64Array.from(srvSetpoint),
+    srvReseat: Float64Array.from(srvReseat),
+    srvOpenTime: Float64Array.from(srvOpenTime),
+    srvCloseTime: Float64Array.from(srvCloseTime),
   };
 }
