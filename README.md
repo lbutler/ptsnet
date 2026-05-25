@@ -152,6 +152,7 @@ const sim = await PtsnetSimulation.create({
     pipes: 'none',            // string[] | 'all' (default) | 'none'
     every: 10,                // keep one sample every 10 steps (t=0 always kept)
     envelope: true,           // also track per-element min/max over every step
+    pipeProfileHead: true,    // also keep head at every interior point of every pipe
   },
 });
 sim.run();
@@ -164,6 +165,27 @@ sim.envelope!.node.headMax;               // max head at every node (O(elements)
 `nodes`/`pipes`/`every` selection), so `nodes: 'none', pipes: 'none', envelope:
 true` gives the full pressure envelope at O(elements) memory — bounded
 regardless of run length.
+
+`pipeProfileHead` keeps the head at **every discretization point** (interior +
+boundary) of every pipe each recorded step, exposed as `sim.results.pipeProfile`
+— so you can read head *along* a pipe (e.g. a travelling pressure-wave overlay),
+not just at its end nodes. It honours `every` but its memory is
+O(numPoints × recorded steps) (potentially large), so it's intended for small
+networks / visualization. The data is laid out step-major: head for step `t` at
+point `j` is `data[t*numPoints + j]`, and pipe `p`'s profile (start node → end
+node) is the contiguous block `data[t*numPoints + offset[p] .. + offset[p] +
+segments[p]]`.
+
+```ts
+const pp = sim.results.pipeProfile!;
+const p  = pp.labels.indexOf('PIPE-12');
+const t  = pp.cols - 1;                                  // last recorded step
+const start = pp.offset[p];
+const profile = pp.data.subarray(                        // head start→end of PIPE-12
+  t * pp.numPoints + start,
+  t * pp.numPoints + start + pp.segments[p] + 1,
+);
+```
 
 ### Progress, streaming & cancellation
 

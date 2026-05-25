@@ -50,10 +50,36 @@ export interface PipeResults {
   flowrate: ResultSeries;
 }
 
+/**
+ * Head profile along every pipe: one value per discretization point (interior +
+ * boundary), so head can be read ALONG a pipe, not just at its end nodes. Only
+ * present when `RecordingOptions.pipeProfileHead` is set.
+ */
+export interface PipeProfile {
+  /** Pipe labels, in pipe-table order. */
+  labels: string[];
+  /** First point index of each pipe within a step block (= model.dboundary[p]). */
+  offset: Int32Array;
+  /** Segment count per pipe; point count for pipe p = segments[p] + 1. */
+  segments: Int32Array;
+  /** Total discretization points across all pipes (one step block length). */
+  numPoints: number;
+  /** Recorded time steps (columns). */
+  cols: number;
+  /**
+   * Head at every point, step-major: head for step t, point j is
+   * data[t*numPoints + j]. The block data[t*numPoints + offset[p] ..
+   * + offset[p] + segments[p]] is pipe p's profile from start node to end node.
+   */
+  data: Float64Array;
+}
+
 export interface SimulationResults {
   node: NodeResults;
   pipeStart: PipeResults;
   pipeEnd: PipeResults;
+  /** Full head profile along every pipe (only when `pipeProfileHead` is set). */
+  pipeProfile?: PipeProfile;
 }
 
 /**
@@ -69,6 +95,14 @@ export interface RecordingOptions {
   every?: number;
   /** Also track per-element min/max over every step (O(elements) memory). */
   envelope?: boolean;
+  /**
+   * Also keep the full head profile at every pipe discretization point (interior
+   * + boundary) every recorded step, exposed as `results.pipeProfile`. Lets a
+   * consumer draw head ALONG each pipe (e.g. a transient pressure-wave overlay),
+   * not just at nodes. Memory is O(numPoints × recorded steps) — potentially
+   * large; intended for small networks / visualization. Honours `every`. Off by
+   * default (existing output is byte-identical). */
+  pipeProfileHead?: boolean;
 }
 
 /** Per-element extrema over the whole run (independent of `nodes`/`pipes`/`every`). */
@@ -117,11 +151,22 @@ export interface SerializedSeries {
   data: number[];
 }
 
+/** JSON-safe form of {@link PipeProfile} (typed arrays → plain arrays). */
+export interface SerializedPipeProfile {
+  labels: string[];
+  offset: number[];
+  segments: number[];
+  numPoints: number;
+  cols: number;
+  data: number[];
+}
+
 export interface SerializedResults {
   time: number[];
   node: { head: SerializedSeries; leakFlow: SerializedSeries; demandFlow: SerializedSeries };
   pipeStart: { flowrate: SerializedSeries };
   pipeEnd: { flowrate: SerializedSeries };
+  pipeProfile?: SerializedPipeProfile;
 }
 
 function seriesToJSON(s: ResultSeries): SerializedSeries {
@@ -136,7 +181,7 @@ function seriesFromJSON(o: SerializedSeries): ResultSeries {
 
 /** Convert results + time stamps into a JSON-serializable object. */
 export function serializeResults(results: SimulationResults, time: Float64Array): SerializedResults {
-  return {
+  const out: SerializedResults = {
     time: Array.from(time),
     node: {
       head: seriesToJSON(results.node.head),
@@ -146,6 +191,18 @@ export function serializeResults(results: SimulationResults, time: Float64Array)
     pipeStart: { flowrate: seriesToJSON(results.pipeStart.flowrate) },
     pipeEnd: { flowrate: seriesToJSON(results.pipeEnd.flowrate) },
   };
+  if (results.pipeProfile) {
+    const pp = results.pipeProfile;
+    out.pipeProfile = {
+      labels: pp.labels,
+      offset: Array.from(pp.offset),
+      segments: Array.from(pp.segments),
+      numPoints: pp.numPoints,
+      cols: pp.cols,
+      data: Array.from(pp.data),
+    };
+  }
+  return out;
 }
 
 /** Reconstruct results + time stamps from `serializeResults` output. */
@@ -153,16 +210,25 @@ export function deserializeResults(obj: SerializedResults): {
   results: SimulationResults;
   time: Float64Array;
 } {
-  return {
-    time: Float64Array.from(obj.time),
-    results: {
-      node: {
-        head: seriesFromJSON(obj.node.head),
-        leakFlow: seriesFromJSON(obj.node.leakFlow),
-        demandFlow: seriesFromJSON(obj.node.demandFlow),
-      },
-      pipeStart: { flowrate: seriesFromJSON(obj.pipeStart.flowrate) },
-      pipeEnd: { flowrate: seriesFromJSON(obj.pipeEnd.flowrate) },
+  const results: SimulationResults = {
+    node: {
+      head: seriesFromJSON(obj.node.head),
+      leakFlow: seriesFromJSON(obj.node.leakFlow),
+      demandFlow: seriesFromJSON(obj.node.demandFlow),
     },
+    pipeStart: { flowrate: seriesFromJSON(obj.pipeStart.flowrate) },
+    pipeEnd: { flowrate: seriesFromJSON(obj.pipeEnd.flowrate) },
   };
+  if (obj.pipeProfile) {
+    const pp = obj.pipeProfile;
+    results.pipeProfile = {
+      labels: pp.labels,
+      offset: Int32Array.from(pp.offset),
+      segments: Int32Array.from(pp.segments),
+      numPoints: pp.numPoints,
+      cols: pp.cols,
+      data: Float64Array.from(pp.data),
+    };
+  }
+  return { time: Float64Array.from(obj.time), results };
 }

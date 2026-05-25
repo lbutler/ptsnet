@@ -32,8 +32,10 @@ export type {
   SimulationResults,
   NodeResults,
   PipeResults,
+  PipeProfile,
   SerializedResults,
   SerializedSeries,
+  SerializedPipeProfile,
   RecordingOptions,
   Envelope,
 } from './core/results';

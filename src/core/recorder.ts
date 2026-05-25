@@ -13,6 +13,7 @@ import {
   SimulationResults,
   RecordingOptions,
   Envelope,
+  PipeProfile,
 } from './results';
 
 function resolveRows(
@@ -43,6 +44,7 @@ export class Recorder {
   readonly time: Float64Array;
   readonly results: SimulationResults;
   readonly envelope?: Envelope;
+  readonly pipeProfile?: PipeProfile;
 
   constructor(
     private readonly model: EngineModel,
@@ -102,6 +104,22 @@ export class Recorder {
         },
       };
     }
+
+    if (options.pipeProfileHead) {
+      const numPoints = model.numPoints;
+      // Points are laid out pipe by pipe (buildEngineModel): pipe p owns the
+      // contiguous range [dboundary[p] .. uboundary[p]] = segments[p]+1 points.
+      const pipeProfile: PipeProfile = {
+        labels: ss.pipe.labels.slice(),
+        offset: Int32Array.from(model.dboundary),
+        segments: Int32Array.from({ length: ss.pipe.n }, (_, p) => model.uboundary[p] - model.dboundary[p]),
+        numPoints,
+        cols: this.recCols,
+        data: new Float64Array(numPoints * this.recCols),
+      };
+      this.pipeProfile = pipeProfile;
+      this.results.pipeProfile = pipeProfile; // surface via sim.results
+    }
   }
 
   private colOf(t: number): number {
@@ -135,6 +153,11 @@ export class Recorder {
 
     const col = this.colOf(t);
     if (col < 0) return;
+
+    if (this.pipeProfile) {
+      // `head` is the full length-numPoints column; store it as this step's block.
+      this.pipeProfile.data.set(head, col * this.pipeProfile.numPoints);
+    }
 
     const { head: headSeries, leakFlow, demandFlow } = this.results.node;
     for (let i = 0; i < this.recNodeRows.length; i++) {
