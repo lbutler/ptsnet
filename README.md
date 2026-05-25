@@ -98,11 +98,12 @@ sim.addOneWaySurgeTank(nodeName, { tankArea, initialLevel, bottomLevel, refillAr
                              // initialLevel defaults to the steady head, bottomLevel to the node elevation
 ```
 
-Column separation and unsteady friction are `create` options, not operations:
+Column separation and friction models are `create` options, not operations:
 
 ```ts
-PtsnetSimulation.create({ inp, settings, cavitation: true });        // column separation (DGCM)
-PtsnetSimulation.create({ inp, settings, unsteadyFriction: true });  // Brunone unsteady friction
+PtsnetSimulation.create({ inp, settings, cavitation: true });           // column separation (DGCM)
+PtsnetSimulation.create({ inp, settings, unsteadyFriction: true });     // Brunone unsteady friction
+PtsnetSimulation.create({ inp, settings, quasiSteadyFriction: true });  // recompute f from instantaneous V
 ```
 
 ### Results
@@ -343,6 +344,37 @@ bit-identical across worker counts. Unsteady friction is **opt-in** (default run
 are byte-identical), composes with column separation, and matters most for
 small-scale / laboratory pipelines (its damping signature shrinks on large
 transmission mains).
+
+### Quasi-steady friction
+
+The base engine freezes the Darcy friction factor `f` at its steady-state value.
+As the velocity (hence Reynolds number) swings during a transient the real `f`
+changes, so a frozen `f` slightly mis-damps the trace. **Quasi-steady friction**
+recomputes `f` each step from the *instantaneous* velocity using the explicit
+Swamee–Jain approximation of Colebrook–White — a cheap, modest accuracy gain and
+the stepping stone before Brunone:
+
+```ts
+const sim = await PtsnetSimulation.create({
+  inp,
+  settings: { duration: 3, timeStep: 2e-4, defaultWaveSpeed: 1200, waveSpeedMethod: 'user' },
+  quasiSteadyFriction: true, // or { viscosity }
+});
+```
+
+The MOC friction term `R·|Q|` becomes `f(Re)·Rgeo·|Q|`, with `Rgeo = Δx/(2gDA²)`
+the geometric part and `Re = |Q|·D/(Aν)` (`{ viscosity }` sets ν, default
+1e-6 m²/s). To stay formula-agnostic and need no extra input, the law is
+**anchored to the steady operating point**: per pipe an effective relative
+roughness `ε/D` is backed out from the steady `(f_steady, Re₀)` by inverting
+Swamee–Jain, so `f(Re₀) = f_steady` exactly — it therefore works whether the
+`.inp` used Hazen–Williams or Darcy–Weisbach, and a no-transient run stays at
+steady state. Below `Re = 2000` it falls back to laminar `f = 64/Re`. Validated in
+[`test/quasiSteadyFriction.test.ts`](test/quasiSteadyFriction.test.ts): the first
+(Joukowsky) peak is essentially unchanged while later oscillations shift, the
+recomputed factor matches Swamee–Jain, and the result is bit-identical across
+worker counts. Quasi-steady friction is **opt-in** (default runs are
+byte-identical) and composes with column separation and Brunone unsteady friction.
 
 ## Differences from the Python version
 

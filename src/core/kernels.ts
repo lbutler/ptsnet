@@ -8,6 +8,19 @@ import { sign, newton } from './math';
 import type { CavState, PumpTripState } from './boundaryPhase';
 
 /**
+ * Quasi-steady-friction impedance term `f(Re)·Rgeo·|Q|` that replaces the frozen
+ * `R·|Q|`. Laminar (`Re < 2000`, matching `RE_LAMINAR` in `./quasiSteadyFriction`)
+ * gives the linear term `64·Rgeo/refac` (constant in `|Q|`, finite as `|Q|→0`);
+ * otherwise Swamee–Jain. Must stay in sync with the copy in the worker source.
+ */
+function qsfTerm(absQ: number, rgeo: number, refac: number, rrough: number): number {
+  const re = absQ * refac;
+  if (re < 2000) return (64 * rgeo) / refac;
+  const l = Math.log10(rrough / 3.7 + 5.74 / re ** 0.9);
+  return (0.25 / (l * l)) * rgeo * absQ;
+}
+
+/**
  * Interior MOC stencil for the inline (single-worker) path. Must stay in sync
  * with the plain branch of the worker source in `parallel/parallelEngine.ts`.
  *
@@ -15,6 +28,10 @@ import type { CavState, PumpTripState } from './boundaryPhase';
  * implicit local acceleration adds `k·B` to each characteristic impedance
  * (`Bp,Bm`) and the explicit convective term shifts `Cp,Cm`. See
  * {@link ./unsteadyFriction}.
+ *
+ * When `Rgeo` is given, quasi-steady friction is active: the frozen `R·|Q|`
+ * impedance term is replaced by `f(Re)·Rgeo·|Q|` via {@link qsfTerm}. See
+ * {@link ./quasiSteadyFriction}.
  */
 export function runInteriorStep(
   Q0: Float64Array,
@@ -30,13 +47,22 @@ export function runInteriorStep(
   hasPlus: Int32Array,
   hasMinus: Int32Array,
   Ku?: Float64Array,
+  Rgeo?: Float64Array,
+  Refac?: Float64Array,
+  Rrough?: Float64Array,
 ): void {
   const n = Q0.length;
   for (let i = 1; i < n - 1; i++) {
+    const fdn = Rgeo
+      ? qsfTerm(Math.abs(Q0[i + 1]), Rgeo[i], Refac![i], Rrough![i])
+      : R[i] * Math.abs(Q0[i + 1]);
+    const fup = Rgeo
+      ? qsfTerm(Math.abs(Q0[i - 1]), Rgeo[i], Refac![i], Rrough![i])
+      : R[i] * Math.abs(Q0[i - 1]);
     Cm[i] = (H0[i + 1] - B[i] * Q0[i + 1]) * hasMinus[i];
-    Bm[i] = (B[i] + R[i] * Math.abs(Q0[i + 1])) * hasMinus[i];
+    Bm[i] = (B[i] + fdn) * hasMinus[i];
     Cp[i] = (H0[i - 1] + B[i] * Q0[i - 1]) * hasPlus[i];
-    Bp[i] = (B[i] + R[i] * Math.abs(Q0[i - 1])) * hasPlus[i];
+    Bp[i] = (B[i] + fup) * hasPlus[i];
     let cp = Cp[i];
     let cm = Cm[i];
     let bp = Bp[i];
@@ -55,8 +81,14 @@ export function runInteriorStep(
   }
   Cm[0] = H0[1] - B[0] * Q0[1];
   Cp[n - 1] = H0[n - 2] + B[n - 2] * Q0[n - 2];
-  Bm[0] = B[0] + R[0] * Math.abs(Q0[1]);
-  Bp[n - 1] = B[n - 2] + R[n - 2] * Math.abs(Q0[n - 2]);
+  Bm[0] =
+    B[0] +
+    (Rgeo ? qsfTerm(Math.abs(Q0[1]), Rgeo[0], Refac![0], Rrough![0]) : R[0] * Math.abs(Q0[1]));
+  Bp[n - 1] =
+    B[n - 2] +
+    (Rgeo
+      ? qsfTerm(Math.abs(Q0[n - 2]), Rgeo[n - 2], Refac![n - 2], Rrough![n - 2])
+      : R[n - 2] * Math.abs(Q0[n - 2]));
 }
 
 /**
@@ -85,13 +117,22 @@ export function runInteriorStepCav(
   dt: number,
   psi: number,
   Ku?: Float64Array,
+  Rgeo?: Float64Array,
+  Refac?: Float64Array,
+  Rrough?: Float64Array,
 ): void {
   const n = h0.length;
   for (let i = 1; i < n - 1; i++) {
+    const fup = Rgeo
+      ? qsfTerm(Math.abs(qd0[i - 1]), Rgeo[i], Refac![i], Rrough![i])
+      : R[i] * Math.abs(qd0[i - 1]);
+    const fdn = Rgeo
+      ? qsfTerm(Math.abs(qu0[i + 1]), Rgeo[i], Refac![i], Rrough![i])
+      : R[i] * Math.abs(qu0[i + 1]);
     const cp0 = (h0[i - 1] + B[i] * qd0[i - 1]) * hasPlus[i];
-    const bp = (B[i] + R[i] * Math.abs(qd0[i - 1])) * hasPlus[i];
+    const bp = (B[i] + fup) * hasPlus[i];
     const cm0 = (h0[i + 1] - B[i] * qu0[i + 1]) * hasMinus[i];
-    const bm = (B[i] + R[i] * Math.abs(qu0[i + 1])) * hasMinus[i];
+    const bm = (B[i] + fdn) * hasMinus[i];
     Cp[i] = cp0;
     Bp[i] = bp;
     Cm[i] = cm0;
@@ -132,9 +173,15 @@ export function runInteriorStepCav(
     }
   }
   Cm[0] = h0[1] - B[0] * qu0[1];
-  Bm[0] = B[0] + R[0] * Math.abs(qu0[1]);
+  Bm[0] =
+    B[0] +
+    (Rgeo ? qsfTerm(Math.abs(qu0[1]), Rgeo[0], Refac![0], Rrough![0]) : R[0] * Math.abs(qu0[1]));
   Cp[n - 1] = h0[n - 2] + B[n - 2] * qd0[n - 2];
-  Bp[n - 1] = B[n - 2] + R[n - 2] * Math.abs(qd0[n - 2]);
+  Bp[n - 1] =
+    B[n - 2] +
+    (Rgeo
+      ? qsfTerm(Math.abs(qd0[n - 2]), Rgeo[n - 2], Refac![n - 2], Rrough![n - 2])
+      : R[n - 2] * Math.abs(qd0[n - 2]));
 }
 
 /** Solve boundary points attached to general junction nodes (and reservoirs/tanks). */

@@ -45,6 +45,10 @@ import {
   UnsteadyFrictionOptions,
   buildUnsteadyFrictionFactors,
 } from './../core/unsteadyFriction';
+import {
+  QuasiSteadyFrictionOptions,
+  buildQuasiSteadyFrictionFactors,
+} from './../core/quasiSteadyFriction';
 
 // Control block indices.
 const PHASE = 0;
@@ -68,6 +72,17 @@ const WORKER_SOURCE = /* js */ `(function () {
     var phase = 0;
     var uf = d.uf, Ku = uf ? new Float64Array(d.kuSab) : null;
     function sgn(x) { return x > 0 ? 1 : (x < 0 ? -1 : 0); }
+    var qsf = d.qsf;
+    var Rgeo = qsf ? new Float64Array(d.rgeoSab) : null;
+    var Refac = qsf ? new Float64Array(d.refacSab) : null;
+    var Rrough = qsf ? new Float64Array(d.rroughSab) : null;
+    // Quasi-steady friction term f(Re)·Rgeo·|Q| — must match qsfTerm in core/kernels.ts.
+    function qsfTerm(aq, i) {
+      var re = aq * Refac[i];
+      if (re < 2000) return (64 * Rgeo[i]) / Refac[i];
+      var l = Math.log10(Rrough[i] / 3.7 + 5.74 / (re ** 0.9));
+      return (0.25 / (l * l)) * Rgeo[i] * aq;
+    }
     if (d.cav) {
       var qd = new Float64Array(d.flowSab), qu = new Float64Array(d.quSab);
       var gasVol = new Float64Array(d.gasVolSab), Hgas = new Float64Array(d.hgasSab), C3 = new Float64Array(d.c3Sab);
@@ -80,10 +95,12 @@ const WORKER_SOURCE = /* js */ `(function () {
         var o0 = Atomics.load(ctrl, T0) * N, o1 = Atomics.load(ctrl, T1) * N;
         for (var i = iLo; i < iHi; i++) {
           var up = o0 + i - 1, dn = o0 + i + 1;
+          var fup = qsf ? qsfTerm(abs(qd[up]), i) : R[i] * abs(qd[up]);
+          var fdn = qsf ? qsfTerm(abs(qu[dn]), i) : R[i] * abs(qu[dn]);
           var cp = (head[up] + B[i] * qd[up]) * hasPlus[i];
-          var bp = (B[i] + R[i] * abs(qd[up])) * hasPlus[i];
+          var bp = (B[i] + fup) * hasPlus[i];
           var cm = (head[dn] - B[i] * qu[dn]) * hasMinus[i];
-          var bm = (B[i] + R[i] * abs(qu[dn])) * hasMinus[i];
+          var bm = (B[i] + fdn) * hasMinus[i];
           Cp[i] = cp; Bp[i] = bp; Cm[i] = cm; Bm[i] = bm;
           if (isInt[i]) {
             if (uf) {
@@ -105,8 +122,8 @@ const WORKER_SOURCE = /* js */ `(function () {
             qu[o1 + i] = (cp - H) * invBp;
           }
         }
-        if (lo === 0) { Cm[0] = head[o0 + 1] - B[0] * qu[o0 + 1]; Bm[0] = B[0] + R[0] * abs(qu[o0 + 1]); }
-        if (hi === N) { Cp[N - 1] = head[o0 + N - 2] + B[N - 2] * qd[o0 + N - 2]; Bp[N - 1] = B[N - 2] + R[N - 2] * abs(qd[o0 + N - 2]); }
+        if (lo === 0) { Cm[0] = head[o0 + 1] - B[0] * qu[o0 + 1]; Bm[0] = B[0] + (qsf ? qsfTerm(abs(qu[o0 + 1]), 0) : R[0] * abs(qu[o0 + 1])); }
+        if (hi === N) { Cp[N - 1] = head[o0 + N - 2] + B[N - 2] * qd[o0 + N - 2]; Bp[N - 1] = B[N - 2] + (qsf ? qsfTerm(abs(qd[o0 + N - 2]), N - 2) : R[N - 2] * abs(qd[o0 + N - 2])); }
         if (Atomics.add(ctrl, DONE, 1) === W - 1) Atomics.notify(ctrl, DONE);
       }
     } else {
@@ -118,10 +135,12 @@ const WORKER_SOURCE = /* js */ `(function () {
         var o0 = Atomics.load(ctrl, T0) * N, o1 = Atomics.load(ctrl, T1) * N;
         for (var i = iLo; i < iHi; i++) {
           var up = o0 + i - 1, dn = o0 + i + 1;
+          var fdn = qsf ? qsfTerm(abs(flow[dn]), i) : R[i] * abs(flow[dn]);
+          var fup = qsf ? qsfTerm(abs(flow[up]), i) : R[i] * abs(flow[up]);
           var cm = (head[dn] - B[i] * flow[dn]) * hasMinus[i];
-          var bm = (B[i] + R[i] * abs(flow[dn])) * hasMinus[i];
+          var bm = (B[i] + fdn) * hasMinus[i];
           var cp = (head[up] + B[i] * flow[up]) * hasPlus[i];
-          var bp = (B[i] + R[i] * abs(flow[up])) * hasPlus[i];
+          var bp = (B[i] + fup) * hasPlus[i];
           Cm[i] = cm; Bm[i] = bm; Cp[i] = cp; Bp[i] = bp;
           if (uf) {
             var kB = Ku[i], q = flow[o0 + i];
@@ -131,8 +150,8 @@ const WORKER_SOURCE = /* js */ `(function () {
           head[o1 + i] = (cp * bm + cm * bp) / (bp + bm);
           flow[o1 + i] = (cp - cm) / (bp + bm);
         }
-        if (lo === 0) { Cm[0] = head[o0 + 1] - B[0] * flow[o0 + 1]; Bm[0] = B[0] + R[0] * abs(flow[o0 + 1]); }
-        if (hi === N) { Cp[N - 1] = head[o0 + N - 2] + B[N - 2] * flow[o0 + N - 2]; Bp[N - 1] = B[N - 2] + R[N - 2] * abs(flow[o0 + N - 2]); }
+        if (lo === 0) { Cm[0] = head[o0 + 1] - B[0] * flow[o0 + 1]; Bm[0] = B[0] + (qsf ? qsfTerm(abs(flow[o0 + 1]), 0) : R[0] * abs(flow[o0 + 1])); }
+        if (hi === N) { Cp[N - 1] = head[o0 + N - 2] + B[N - 2] * flow[o0 + N - 2]; Bp[N - 1] = B[N - 2] + (qsf ? qsfTerm(abs(flow[o0 + N - 2]), N - 2) : R[N - 2] * abs(flow[o0 + N - 2])); }
         if (Atomics.add(ctrl, DONE, 1) === W - 1) Atomics.notify(ctrl, DONE);
       }
     }
@@ -186,6 +205,12 @@ export class ParallelEngine {
   private readonly uf: boolean;
   private readonly Ku?: Float64Array; // per-point k·B factor
 
+  // Quasi-steady friction, present only when enabled.
+  private readonly qsf: boolean;
+  private readonly Rgeo?: Float64Array; // per-point geometric resistance Δx/(2gDA²)
+  private readonly Refac?: Float64Array; // per-point Reynolds factor D/(Aν)
+  private readonly Rrough?: Float64Array; // per-point effective relative roughness ε/D
+
   // Column separation (DGCM) state, present only when cavitating.
   private readonly cav: boolean;
   private readonly qu?: Float64Array; // length 2N (upstream face)
@@ -219,6 +244,7 @@ export class ParallelEngine {
     cavitation?: CavitationOptions,
     private readonly pumpTrip?: PumpTripState,
     unsteadyFriction?: UnsteadyFrictionOptions,
+    quasiSteadyFriction?: QuasiSteadyFrictionOptions,
   ) {
     const n = model.numPoints;
     this.n = n;
@@ -227,6 +253,7 @@ export class ParallelEngine {
     this.cav = cavitation !== undefined;
     this.psi = cavitation?.psi ?? 1;
     this.uf = unsteadyFriction !== undefined;
+    this.qsf = quasiSteadyFriction !== undefined;
 
     const flow = f64(2 * n);
     const head = f64(2 * n);
@@ -262,6 +289,22 @@ export class ParallelEngine {
       this.Ku = ku.arr;
     }
 
+    let rgeo: { sab: SharedArrayBuffer; arr: Float64Array } | undefined;
+    let refac: { sab: SharedArrayBuffer; arr: Float64Array } | undefined;
+    let rrough: { sab: SharedArrayBuffer; arr: Float64Array } | undefined;
+    if (this.qsf) {
+      rgeo = f64(n);
+      refac = f64(n);
+      rrough = f64(n);
+      const qf = buildQuasiSteadyFrictionFactors(ss, model, quasiSteadyFriction!);
+      rgeo.arr.set(qf.rgeo);
+      refac.arr.set(qf.refac);
+      rrough.arr.set(qf.rrough);
+      this.Rgeo = rgeo.arr;
+      this.Refac = refac.arr;
+      this.Rrough = rrough.arr;
+    }
+
     const shared: Record<string, unknown> = {
       flowSab: flow.sab,
       headSab: head.sab,
@@ -279,6 +322,10 @@ export class ParallelEngine {
       cav: this.cav,
       uf: this.uf,
       kuSab: ku?.sab,
+      qsf: this.qsf,
+      rgeoSab: rgeo?.sab,
+      refacSab: refac?.sab,
+      rroughSab: rrough?.sab,
     };
 
     if (cavitation) {
@@ -348,11 +395,15 @@ export class ParallelEngine {
         qd0, qu0, h0, qd1, qu1, h1,
         m.B, m.R, this.Cp, this.Bp, this.Cm, this.Bm, m.hasPlus, m.hasMinus,
         this.gasVol!, this.Hgas!, this.C3!, this.timeStep, this.psi, this.Ku,
+        this.Rgeo, this.Refac, this.Rrough,
       );
     } else {
       const q0 = this.flow.subarray(t0 * n, t0 * n + n);
       const q1 = this.flow.subarray(t1 * n, t1 * n + n);
-      runInteriorStep(q0, h0, q1, h1, m.B, m.R, this.Cp, this.Bp, this.Cm, this.Bm, m.hasPlus, m.hasMinus, this.Ku);
+      runInteriorStep(
+        q0, h0, q1, h1, m.B, m.R, this.Cp, this.Bp, this.Cm, this.Bm, m.hasPlus, m.hasMinus,
+        this.Ku, this.Rgeo, this.Refac, this.Rrough,
+      );
     }
   }
 
