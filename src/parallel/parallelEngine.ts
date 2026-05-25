@@ -90,8 +90,15 @@ const WORKER_SOURCE = /* js */ `(function () {
       var dt = d.dt, psi = d.psi;
       for (;;) {
         Atomics.wait(ctrl, PHASE, phase);
-        phase = Atomics.load(ctrl, PHASE);
         if (Atomics.load(ctrl, TERM)) break;
+        // Stale-wakeup guard: dispatch's store(PHASE) and notify(PHASE) are not a
+        // single atomic op, so a fast worker can clear its wait via the value
+        // check, finish the step, re-block on the same phase, then be woken by the
+        // already-issued notify. Re-running that phase would double-count DONE and
+        // let the main thread proceed before every worker has written its range.
+        var next = Atomics.load(ctrl, PHASE);
+        if (next === phase) continue;
+        phase = next;
         var o0 = Atomics.load(ctrl, T0) * N, o1 = Atomics.load(ctrl, T1) * N;
         for (var i = iLo; i < iHi; i++) {
           var up = o0 + i - 1, dn = o0 + i + 1;
@@ -130,8 +137,15 @@ const WORKER_SOURCE = /* js */ `(function () {
       var flow = new Float64Array(d.flowSab);
       for (;;) {
         Atomics.wait(ctrl, PHASE, phase);
-        phase = Atomics.load(ctrl, PHASE);
         if (Atomics.load(ctrl, TERM)) break;
+        // Stale-wakeup guard: dispatch's store(PHASE) and notify(PHASE) are not a
+        // single atomic op, so a fast worker can clear its wait via the value
+        // check, finish the step, re-block on the same phase, then be woken by the
+        // already-issued notify. Re-running that phase would double-count DONE and
+        // let the main thread proceed before every worker has written its range.
+        var next = Atomics.load(ctrl, PHASE);
+        if (next === phase) continue;
+        phase = next;
         var o0 = Atomics.load(ctrl, T0) * N, o1 = Atomics.load(ctrl, T1) * N;
         for (var i = iLo; i < iHi; i++) {
           var up = o0 + i - 1, dn = o0 + i + 1;
