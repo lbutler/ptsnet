@@ -78,6 +78,7 @@ sim.addSurgeProtection(nodeName, 'open',   tankArea);
 sim.addSurgeProtection(nodeName, 'closed', tankArea, tankHeight, waterLevel);
 sim.addCheckValve(pipeName); // forward-flow-only pipe; shuts on reversal (no backflow).
                              // EPANET CV-status pipes are honored automatically.
+sim.addAirValve(nodeName, { inflowArea, outflowArea }); // combination air/vacuum valve at a high point
 ```
 
 ### Results

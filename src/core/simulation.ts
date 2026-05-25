@@ -464,6 +464,42 @@ export class PtsnetSimulation {
   }
 
   /**
+   * Install a combination air/vacuum valve at a node between two pipes (a high
+   * point). It admits air through `inflowArea` when the node pressure drops below
+   * atmospheric — limiting the down-surge / column separation — and expels it
+   * through `outflowArea` on repressurization (a small outlet can trap and
+   * compress the air, causing an "air-slam" surge). Areas are in m².
+   */
+  addAirValve(
+    nodeName: string,
+    options: { inflowArea: number; outflowArea?: number; dischargeCoeff?: number },
+  ): void {
+    const node = this.ss.node;
+    const nodeId = node.index.get(nodeName);
+    if (nodeId === undefined) throw new Error(`unknown node '${nodeName}'`);
+    if (this.ss.airValve.has(nodeName)) throw new Error(`node '${nodeName}' already has an air valve`);
+    if (!(options.inflowArea > 0)) throw new Error('air valve requires inflowArea > 0');
+    const onNonPipe = [
+      ...this.ss.pump.startNode,
+      ...this.ss.pump.endNode,
+      ...this.ss.valve.startNode,
+      ...this.ss.valve.endNode,
+    ].includes(nodeId);
+    if (node.degree[nodeId] !== 2 || onNonPipe) {
+      throw new Error(`node '${nodeName}' is not between two pipes`);
+    }
+    const cd = options.dischargeCoeff ?? 0.6;
+    this.ss.airValve.set(nodeName, {
+      label: nodeName,
+      node: nodeId,
+      inflowArea: options.inflowArea,
+      outflowArea: options.outflowArea ?? options.inflowArea,
+      inCoeff: cd,
+      outCoeff: cd,
+    });
+  }
+
+  /**
    * Mark a pipe as carrying an (ideal) check valve: it passes flow in the
    * steady-state direction and shuts the instant flow reverses, preventing
    * backflow (e.g. on the down-surge after a downstream valve closure or, later,

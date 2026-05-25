@@ -105,6 +105,16 @@ export interface ClosedProtection {
   waterLevel: number;
 }
 
+/** A combination air/vacuum valve at a node: admits air on vacuum, expels on pressurization. */
+export interface AirValve {
+  label: string;
+  node: number;
+  inflowArea: number; // inlet orifice area [m²]
+  outflowArea: number; // outlet orifice area [m²]
+  inCoeff: number; // inlet discharge coefficient
+  outCoeff: number; // outlet discharge coefficient
+}
+
 /** The complete steady-state model produced from the EPANET solve. */
 export interface SteadyState {
   node: NodeTable;
@@ -113,6 +123,7 @@ export interface SteadyState {
   valve: ValveTable;
   openProtection: Map<string, OpenProtection>;
   closedProtection: Map<string, ClosedProtection>;
+  airValve: Map<string, AirValve>;
   /** Adjacency: link names touching each node (by node index). */
   linksForNode: string[][];
 }
