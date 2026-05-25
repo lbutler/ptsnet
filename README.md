@@ -495,6 +495,76 @@ the working tree (it remains in git history). The frozen parity reference
 it you must restore the Python package from history; see
 [`compare/README.md`](compare/README.md) for the exact steps.
 
+## Publishing to npm (`@epanet-js/ptsnet`)
+
+This package is published to the public npm registry under the **`@epanet-js`**
+scope. Scoped packages are **private by default**, so the steps below explicitly
+publish with *public* access.
+
+### One-time setup
+
+1. **npm account & scope access.** You need an npm account that belongs to the
+   `epanet-js` organization with *publish* rights.
+   - If the org doesn't exist yet, create it at
+     <https://www.npmjs.com/org/create> with the name `epanet-js` — this claims
+     the `@epanet-js` scope. (The free plan is fine for *public* packages.)
+   - Otherwise, ask an existing org owner to add you as a member.
+2. **Enable 2FA** on your npm account (recommended; npm may prompt for a one-time
+   code at publish time).
+3. **Rename the package.** In [`package.json`](package.json), change the name and
+   add a `publishConfig` so scoped publishes default to public:
+   ```jsonc
+   {
+     "name": "@epanet-js/ptsnet",
+     "publishConfig": { "access": "public" }
+   }
+   ```
+   The `publishConfig.access: "public"` line is what lets a *scoped* package
+   publish to the public registry (equivalent to passing `--access public` on
+   every publish). Without it, npm tries to publish privately and fails unless
+   you're on a paid plan.
+4. **Update the references to the old unscoped name** so the docs match what users
+   actually install:
+   - the install command in [Installation](#installation):
+     `npm install ptsnet …` → `npm install @epanet-js/ptsnet …`
+   - the import in the usage examples:
+     `from 'ptsnet'` → `from '@epanet-js/ptsnet'`
+
+### Each release
+
+```sh
+# 1. Confirm you're logged in to the right account
+npm login            # or: npm whoami  to check
+
+# 2. Green tests + a clean working tree (npm version requires this)
+npm test
+git status           # should report "nothing to commit, working tree clean"
+
+# 3. Bump the version (writes package.json, commits, and creates a git tag)
+npm version patch    # or: minor / major
+
+# 4. Dry-run: inspect the tarball without uploading
+npm publish --dry-run
+#    └─ verify the package name is @epanet-js/ptsnet and the tarball
+#       contains only dist/ and examples/
+
+# 5. Publish (the build runs automatically via the prepublishOnly script)
+npm publish          # add --otp=<code> if 2FA prompts you
+#    If you skipped the publishConfig step above, publish with:
+#    npm publish --access public
+
+# 6. Push the version commit and tag
+git push --follow-tags
+```
+
+After it lands, verify at
+<https://www.npmjs.com/package/@epanet-js/ptsnet> and smoke-test a clean
+install in an empty directory: `npm install @epanet-js/ptsnet epanet-js`.
+
+> **First-publish note:** the *very first* publish of a brand-new scoped package
+> must be public-access (via `publishConfig.access` or `--access public`).
+> Subsequent releases inherit the public setting.
+
 <!-- Cite Us -->
 ## Cite Us
 
