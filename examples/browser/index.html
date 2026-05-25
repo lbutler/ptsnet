@@ -3,20 +3,117 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ptsnet — browser parallel demo</title>
+    <title>ptsnet playground</title>
     <style>
-      body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 760px; }
-      pre { background: #f4f4f4; padding: 0.75rem; border-radius: 6px; white-space: pre-wrap; }
-      canvas { border: 1px solid #ccc; width: 100%; height: 240px; }
+      :root { --bd: #d0d5dd; --bg: #f7f8fa; --accent: #0b66c3; }
+      * { box-sizing: border-box; }
+      body { font: 14px/1.5 system-ui, sans-serif; margin: 0; color: #1a1a1a; }
+      header { padding: 0.6rem 1rem; border-bottom: 1px solid var(--bd); display: flex; align-items: baseline; gap: 0.75rem; }
+      header h1 { font-size: 1.05rem; margin: 0; }
+      header span { color: #667085; font-size: 0.85rem; }
+      main { display: grid; grid-template-columns: 340px 1fr; gap: 0; height: calc(100vh - 49px); }
+      .panel { padding: 1rem; overflow-y: auto; border-right: 1px solid var(--bd); background: var(--bg); }
+      .results { padding: 1rem; overflow-y: auto; }
+      fieldset { border: 1px solid var(--bd); border-radius: 8px; margin: 0 0 0.9rem; padding: 0.6rem 0.75rem 0.8rem; background: #fff; }
+      legend { font-weight: 600; font-size: 0.82rem; color: #344054; padding: 0 0.3rem; }
+      label { display: block; font-size: 0.8rem; color: #475467; margin: 0.5rem 0 0.15rem; }
+      .row { display: flex; gap: 0.5rem; }
+      .row > div { flex: 1; }
+      input, select, textarea, button { font: inherit; width: 100%; padding: 0.35rem 0.5rem; border: 1px solid var(--bd); border-radius: 6px; background: #fff; }
+      textarea { font-family: ui-monospace, Menlo, monospace; font-size: 0.75rem; height: 140px; white-space: pre; }
+      select[multiple] { height: 92px; }
+      button { background: var(--accent); color: #fff; border: 0; font-weight: 600; cursor: pointer; padding: 0.55rem; }
+      button.secondary { background: #fff; color: #344054; border: 1px solid var(--bd); font-weight: 500; }
+      button:disabled { opacity: 0.55; cursor: default; }
+      #status { font-size: 0.8rem; color: #475467; min-height: 1.2em; margin: 0.4rem 0; white-space: pre-wrap; }
+      #status.err { color: #b42318; }
+      .chartwrap { margin-bottom: 1.2rem; }
+      .chartwrap h3 { font-size: 0.9rem; margin: 0 0 0.3rem; }
+      canvas { width: 100%; height: 280px; border: 1px solid var(--bd); border-radius: 8px; background: #fff; }
+      .legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; font-size: 0.78rem; margin-top: 0.35rem; }
+      .legend span { display: inline-flex; align-items: center; gap: 0.3rem; }
+      .swatch { width: 12px; height: 3px; display: inline-block; border-radius: 2px; }
+      .hint { font-size: 0.74rem; color: #667085; margin: 0.15rem 0 0; }
     </style>
   </head>
   <body>
-    <h1>ptsnet — browser parallel demo</h1>
-    <p>Runs a TNET3 valve-closure transient on a Web Worker pool (requires
-      <code>SharedArrayBuffer</code> / cross-origin isolation), then plots the head
-      at <code>JUNCTION-73</code>.</p>
-    <pre id="out"></pre>
-    <canvas id="plot" width="720" height="240"></canvas>
+    <header>
+      <h1>ptsnet playground</h1>
+      <span>transient (water-hammer) simulation in the browser</span>
+    </header>
+    <main>
+      <div class="panel">
+        <fieldset>
+          <legend>Network</legend>
+          <label for="example">Bundled example</label>
+          <select id="example"></select>
+          <label for="file">…or load your own .inp</label>
+          <input type="file" id="file" accept=".inp,.txt" />
+          <label for="inp">EPANET .inp (editable)</label>
+          <textarea id="inp" spellcheck="false"></textarea>
+          <button class="secondary" id="load" style="margin-top:0.5rem">Load network</button>
+          <p class="hint" id="netinfo"></p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Settings</legend>
+          <div class="row">
+            <div><label for="duration">Duration [s]</label><input id="duration" type="number" value="20" step="1" min="0.1" /></div>
+            <div><label for="dt">Time step [s]</label><input id="dt" type="number" value="0.1" step="0.01" min="0.0001" /></div>
+          </div>
+          <div class="row">
+            <div><label for="wavespeed">Wave speed [m/s]</label><input id="wavespeed" type="number" value="1000" step="50" /></div>
+            <div><label for="method">Wave-speed method</label>
+              <select id="method"><option>optimal</option><option>user</option><option>critical</option><option>dt</option></select></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.6rem">
+            <input type="checkbox" id="cavitation" style="width:auto" /> Column separation (DGCM cavitation)
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Transient event</legend>
+          <label for="valve">Valve operation</label>
+          <select id="valve"><option value="">(none)</option></select>
+          <div class="row">
+            <div><label for="vfinal">Final setting</label><input id="vfinal" type="number" value="0" step="0.1" min="0" max="1" /></div>
+            <div><label for="vstart">Start [s]</label><input id="vstart" type="number" value="1" step="0.5" /></div>
+            <div><label for="vend">End [s]</label><input id="vend" type="number" value="2" step="0.5" /></div>
+          </div>
+          <label for="pump" style="margin-top:0.6rem">Pump trip (power failure)</label>
+          <select id="pump"><option value="">(none)</option></select>
+          <div class="row">
+            <div><label for="ptrip">Trip [s]</label><input id="ptrip" type="number" value="1" step="0.5" /></div>
+            <div><label for="pinertia">Inertia [kg·m²]</label><input id="pinertia" type="number" value="10" step="1" /></div>
+            <div><label for="pspeed">Speed [rpm]</label><input id="pspeed" type="number" value="1450" step="50" /></div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Plot (Ctrl/⌘-click for multiple)</legend>
+          <label for="nodes">Node head series</label>
+          <select id="nodes" multiple></select>
+          <label for="pipes">Pipe flow series</label>
+          <select id="pipes" multiple></select>
+        </fieldset>
+
+        <button id="run" disabled>Run simulation</button>
+        <p id="status"></p>
+      </div>
+
+      <div class="results">
+        <div class="chartwrap">
+          <h3>Node head [m]</h3>
+          <canvas id="headChart" width="900" height="280"></canvas>
+          <div class="legend" id="headLegend"></div>
+        </div>
+        <div class="chartwrap">
+          <h3>Pipe flow [L/s]</h3>
+          <canvas id="flowChart" width="900" height="280"></canvas>
+          <div class="legend" id="flowLegend"></div>
+        </div>
+      </div>
+    </main>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>
