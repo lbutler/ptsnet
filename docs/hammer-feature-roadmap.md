@@ -57,7 +57,7 @@ Surge-Relief Valves, Transient Forces.
 | [ ] | **Surge-anticipator valve (SAV)** | Med | M | W&S; HAMMER surge-relief docs |
 | [ ] | **Transient forces (unbalanced thrust on pipe runs)** | Med | M | HAMMER Transient Forces; thrust-block design refs |
 | [ ] | **Quasi-steady friction (recompute f from instantaneous V)** | Med | S | Standard MOC texts; cross-check vs steady & Brunone |
-| [ ] | **Simple/two-way surge-tank enhancements (orifice loss, height limits, overflow)** | Med | S | W&S throttled surge tank |
+| [x] | **Simple/two-way surge-tank enhancements (orifice loss, height limits, overflow)** — `addSurgeProtection(..., 'open', ...)` now takes a throttling orifice (head loss `Cf·Q\|Q\|`), a standpipe top (`maxLevel`, overflow/spill), and an empty level (`minLevel`, runs dry → inert until refilled); plain open tanks stay byte-identical on the original kernel | Med | S | W&S throttled surge tank |
 
 ## Tier 3 — Lower / niche (consider skipping)
 
@@ -135,8 +135,16 @@ which the current model may not carry yet.
 instantaneous velocity (Colebrook/Swamee–Jain or H–W) instead of a frozen `f`. Cheap
 and a modest accuracy gain; a stepping stone before Brunone.
 
-**Simple surge-tank enhancements.** Add a throttling-orifice head loss at the tank
-connection, plus standpipe height limits / overflow, to the existing open tank.
+**Simple surge-tank enhancements.** *(Done.)* The open tank
+(`addSurgeProtection(..., 'open', ...)`) takes an optional throttling orifice at
+the connection (head loss `Cf·Q|Q|`, `Cf = 1/(C_d·A·√(2g))²`), a finite standpipe
+top (`maxLevel`, above which it overflows / spills and caps the up-surge), and an
+empty level (`minLevel`, below which it runs dry and reverts to a transparent
+junction until the line head refills it). The tank water level is tracked
+explicitly (it decouples from the node head once an orifice or limit is active)
+and the throttled continuity is solved implicitly each step. A plain open tank
+(no options) is untouched — it stays on the original direct-connection,
+bottomless kernel, so the `surge_open` parity case is byte-identical.
 
 ### Tier 3 (likely skip unless requested)
 

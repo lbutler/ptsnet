@@ -91,10 +91,27 @@ export interface ValveTable {
   curveIndex: Int32Array;
 }
 
+/**
+ * An open surge tank (standpipe, vented to atmosphere) at a degree-2 node.
+ *
+ * The plain tank (defaults: no orifice, no limits) is a direct, frictionless
+ * connection that pins the node head to the tank water level — it damps both the
+ * down- and up-surge. The optional enhancements model a real standpipe: a
+ * throttling orifice between the line and the tank (`orificeArea`, head loss
+ * `Cf·Q|Q|`), a finite standpipe height (`maxLevel`, above which it overflows /
+ * spills), and an empty level (`minLevel`, below which it runs dry and stops
+ * feeding). A tank with any enhancement is solved by `runOpenTanksEnhanced`;
+ * a plain tank stays on the original `runOpenProtections` path.
+ */
 export interface OpenProtection {
   label: string;
   node: number;
-  area: number;
+  area: number; // tank cross-section [m²]
+  orificeArea: number; // throttle-orifice area [m²] (0 = direct connection)
+  orificeCoeff: number; // orifice discharge coefficient
+  maxLevel: number; // overflow level / standpipe top (HGL) [m] (+Inf = no overflow)
+  minLevel: number; // empty level / tank bottom (HGL) [m] (−Inf = bottomless)
+  initialLevel: number; // water-surface HGL at t=0 [m]
 }
 
 export interface ClosedProtection {

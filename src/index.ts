@@ -10,6 +10,7 @@ export type {
   ValveOperationOptions,
   PumpOperationOptions,
   PumpTripOptions,
+  OpenSurgeTankOptions,
   RunOptions,
 } from './core/simulation';
 

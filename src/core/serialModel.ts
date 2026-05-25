@@ -58,6 +58,16 @@ export interface EngineModel {
   openStart: Int32Array;
   openEnd: Int32Array;
   openArea: Float64Array;
+  // Enhanced open surge tanks (orifice loss / height limits / overflow); point
+  // pairs + tank geometry. Separate from the plain `open*` group so plain tanks
+  // stay byte-identical on the original kernel.
+  oeStart: Int32Array;
+  oeEnd: Int32Array;
+  oeArea: Float64Array;
+  oeCf: Float64Array; // throttle-orifice loss coeff Cf [s²/m⁵] (0 = no orifice)
+  oeMax: Float64Array; // overflow level (HGL) [m] (+Inf = no overflow)
+  oeMin: Float64Array; // empty level (HGL) [m] (−Inf = bottomless)
+  oeInitLevel: Float64Array; // initial water level (state seed) [m]
   closedStart: Int32Array;
   closedEnd: Int32Array;
   closedArea: Float64Array;
@@ -306,14 +316,41 @@ export function buildEngineModel(
   const nodeResultLabels = allToNodeArr.map((n) => node.labels[n]);
 
   // --- Surge protections. ---
+  // A plain open tank (no orifice, no level limits) stays on the original
+  // `runOpenProtections` kernel (byte-identical default path). A tank with any
+  // enhancement is routed to the separate enhanced group / kernel.
   const openStart: number[] = [];
   const openEnd: number[] = [];
   const openArea: number[] = [];
+  const oeStart: number[] = [];
+  const oeEnd: number[] = [];
+  const oeArea: number[] = [];
+  const oeCf: number[] = [];
+  const oeMax: number[] = [];
+  const oeMin: number[] = [];
+  const oeInitLevel: number[] = [];
   for (const prot of ss.openProtection.values()) {
     const refs = boundaryAtNode[prot.node];
     const u = refs.find((r) => r.isU);
     const d = refs.find((r) => !r.isU);
-    if (u && d) {
+    if (!u || !d) continue;
+    // A custom initial level also needs the enhanced kernel (the plain one seeds
+    // its level from the steady node head and can't honour an arbitrary start).
+    const enhanced =
+      prot.orificeArea > 0 ||
+      Number.isFinite(prot.maxLevel) ||
+      Number.isFinite(prot.minLevel) ||
+      prot.initialLevel !== node.head[prot.node];
+    if (enhanced) {
+      oeStart.push(u.point);
+      oeEnd.push(d.point);
+      oeArea.push(prot.area);
+      // Cf such that the orifice head loss is Cf·Q|Q| (= Q²/(Cd·A·√(2g))²).
+      oeCf.push(prot.orificeArea > 0 ? 1 / (prot.orificeCoeff * prot.orificeArea * Math.sqrt(2 * G)) ** 2 : 0);
+      oeMax.push(prot.maxLevel);
+      oeMin.push(prot.minLevel);
+      oeInitLevel.push(prot.initialLevel);
+    } else {
       openStart.push(u.point);
       openEnd.push(d.point);
       openArea.push(prot.area);
@@ -499,6 +536,13 @@ export function buildEngineModel(
     openStart: Int32Array.from(openStart),
     openEnd: Int32Array.from(openEnd),
     openArea: Float64Array.from(openArea),
+    oeStart: Int32Array.from(oeStart),
+    oeEnd: Int32Array.from(oeEnd),
+    oeArea: Float64Array.from(oeArea),
+    oeCf: Float64Array.from(oeCf),
+    oeMax: Float64Array.from(oeMax),
+    oeMin: Float64Array.from(oeMin),
+    oeInitLevel: Float64Array.from(oeInitLevel),
     closedStart: Int32Array.from(closedStart),
     closedEnd: Int32Array.from(closedEnd),
     closedArea: Float64Array.from(closedArea),

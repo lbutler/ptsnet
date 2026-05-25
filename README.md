@@ -76,6 +76,12 @@ sim.definePumpTrip(pumpName, { tripTime, inertia, ratedSpeed, ratedEfficiency })
 sim.addBurst(nodeNames, burstCoeff, startTime, endTime);
 sim.addSurgeProtection(nodeName, 'open',   tankArea);
 sim.addSurgeProtection(nodeName, 'closed', tankArea, tankHeight, waterLevel);
+sim.addSurgeProtection(nodeName, 'open',   tankArea, undefined, undefined,
+                       { orificeArea, maxLevel, minLevel, initialLevel });
+                             // open-tank enhancements: a throttling orifice at the
+                             // connection (head loss Cf·Q|Q|), an overflow at maxLevel,
+                             // and an empty level minLevel below which it runs dry.
+                             // Omit them all for the plain, bottomless, direct standpipe.
 sim.addCheckValve(pipeName); // forward-flow-only pipe; shuts on reversal (no backflow).
                              // EPANET CV-status pipes are honored automatically.
 sim.addAirValve(nodeName, { inflowArea, outflowArea }); // combination air/vacuum valve at a high point

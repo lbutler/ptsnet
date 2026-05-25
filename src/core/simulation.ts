@@ -174,6 +174,24 @@ export interface PumpOperationOptions {
   function?: 'linear';
 }
 
+/**
+ * Enhancements for an open surge tank (`addSurgeProtection(..., 'open', ...)`).
+ * All optional; omitting them all gives the plain, direct-connection bottomless
+ * standpipe. All levels are HGL in metres; areas in m².
+ */
+export interface OpenSurgeTankOptions {
+  /** Throttle-orifice area at the tank connection [m²]. 0 (default) = direct connection (no head loss). */
+  orificeArea?: number;
+  /** Orifice discharge coefficient (default 0.6). */
+  orificeCoeff?: number;
+  /** Standpipe top / overflow level (HGL) [m]: water spills above it. Default +∞ (no overflow). */
+  maxLevel?: number;
+  /** Empty level / tank bottom (HGL) [m]: the tank runs dry and stops feeding below it. Default −∞ (bottomless). */
+  minLevel?: number;
+  /** Initial water-surface level (HGL) [m]. Default: the steady-state node head (undisturbed start). */
+  initialLevel?: number;
+}
+
 export interface PumpTripOptions {
   /** Power-failure time [s]; the pump coasts down on its rotating inertia after this. */
   tripTime: number;
@@ -444,12 +462,24 @@ export class PtsnetSimulation {
     }
   }
 
+  /**
+   * Install a surge tank at a node between two pipes.
+   *
+   * `'open'` is a standpipe vented to atmosphere; `'closed'` is a gas vessel /
+   * air chamber (requires `tankHeight` and `waterLevel`). The open tank accepts
+   * optional enhancements (see {@link OpenSurgeTankOptions}) that model a real
+   * standpipe — a throttling orifice at the connection (head loss `Cf·Q|Q|`), a
+   * finite standpipe height that overflows at `maxLevel`, and an empty level
+   * `minLevel` below which it runs dry and stops feeding. A plain open tank (no
+   * options) keeps its original direct-connection, bottomless behaviour.
+   */
   addSurgeProtection(
     nodeName: string,
     protectionType: 'open' | 'closed',
     tankArea: number,
     tankHeight?: number,
     waterLevel?: number,
+    options?: OpenSurgeTankOptions,
   ): void {
     const node = this.ss.node;
     const nodeId = node.index.get(nodeName);
@@ -461,6 +491,9 @@ export class PtsnetSimulation {
     ) {
       throw new Error(`node '${nodeName}' already has a surge protection`);
     }
+    if (options && protectionType !== 'open') {
+      throw new Error('surge-tank enhancement options apply only to open tanks');
+    }
 
     const onNonPipe =
       [...this.ss.pump.startNode, ...this.ss.pump.endNode, ...this.ss.valve.startNode, ...this.ss.valve.endNode].includes(
@@ -471,7 +504,30 @@ export class PtsnetSimulation {
     }
 
     if (protectionType === 'open') {
-      this.ss.openProtection.set(nodeName, { label: nodeName, node: nodeId, area: tankArea });
+      if (!(tankArea > 0)) throw new Error('open surge tank requires tankArea > 0');
+      const orificeArea = options?.orificeArea ?? 0;
+      if (!(orificeArea >= 0)) throw new Error('open surge tank orificeArea must be >= 0');
+      const orificeCoeff = options?.orificeCoeff ?? 0.6;
+      if (orificeArea > 0 && !(orificeCoeff > 0)) {
+        throw new Error('open surge tank orificeCoeff must be > 0');
+      }
+      const maxLevel = options?.maxLevel ?? Infinity;
+      const minLevel = options?.minLevel ?? -Infinity;
+      if (!(minLevel < maxLevel)) throw new Error('open surge tank requires minLevel < maxLevel');
+      const initialLevel = options?.initialLevel ?? node.head[nodeId];
+      if (initialLevel < minLevel || initialLevel > maxLevel) {
+        throw new Error('open surge tank requires minLevel <= initialLevel <= maxLevel');
+      }
+      this.ss.openProtection.set(nodeName, {
+        label: nodeName,
+        node: nodeId,
+        area: tankArea,
+        orificeArea,
+        orificeCoeff,
+        maxLevel,
+        minLevel,
+        initialLevel,
+      });
     } else {
       if (tankHeight === undefined || waterLevel === undefined) {
         throw new Error('tank height and water level are required for closed protection');

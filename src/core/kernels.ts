@@ -474,6 +474,115 @@ export function runOpenProtections(
 }
 
 /**
+ * Solve the throttled tank continuity `(1 + BB·D)·QT + BB·Cf·QT|QT| = g0` for the
+ * net tank inflow QT. With no orifice (`Cf = 0`) it's the linear `g0/(1 + BB·D)`.
+ * The orifice term always opposes flow, so `sign(QT) = sign(g0)` and `|QT|` is the
+ * positive root of `BB·Cf·x² + (1 + BB·D)·x − |g0| = 0` (Citardauq form, no
+ * cancellation). `lin = 1 + BB·D`, `quad = BB·Cf`.
+ */
+function solveThrottledTank(g0: number, lin: number, quad: number): number {
+  if (quad === 0) return g0 / lin;
+  const s = sign(g0);
+  const x = (2 * Math.abs(g0)) / (lin + Math.sqrt(lin * lin + 4 * quad * Math.abs(g0)));
+  return s * x;
+}
+
+/**
+ * Enhanced open surge tank (simple / two-way standpipe) at a degree-2 node.
+ * Extends {@link runOpenProtections} with a throttling orifice at the connection,
+ * a finite standpipe height (overflow), and an empty level (runs dry). Runs after
+ * {@link runGeneralJunction}, which normalizes the boundary characteristics.
+ *
+ * Sign convention matches {@link runOpenProtections}: with `CC = Cp[s]+Cm[e]`,
+ * `BB = Bp[s]+Bm[e]`, the node continuity is `QT = CC − H·BB` (QT > 0 = into the
+ * tank). The tank water level `z` is tracked explicitly (it decouples from the
+ * node head once the orifice or a level limit is active):
+ *
+ *  - **Orifice loss.** A throttle between the line and the tank adds a head loss
+ *    `H = z + Cf·QT|QT|`. With trapezoidal tank storage `z = z0 + D·(QT+qt0)`
+ *    (`D = Δt/2A_T`) this closes to a single equation in QT solved by
+ *    {@link solveThrottledTank}. `Cf = 0` recovers the direct connection `H = z`.
+ *  - **Overflow.** If the level would exceed `zMax` the standpipe spills: `z` is
+ *    pinned at `zMax` (excess inflow is lost) and H re-solved against that fixed
+ *    level — capping the up-surge near `zMax`.
+ *  - **Empty.** If the level would fall below `zMin` the tank is at its bottom;
+ *    while empty it cannot feed the line, so it reverts to a transparent series
+ *    junction (`H = CC/BB`, QT = 0) until the line head rises enough to refill it.
+ *
+ * State (`z` level, `qt0` previous inflow) persists across steps. Boundary points
+ * are mirrored onto the `qu` face by the generic cavitation sync (like the plain
+ * open tank), so no `cav` argument is needed.
+ *
+ * Reference: Wylie & Streeter, *Fluid Transients in Systems* (throttled / simple
+ * surge tanks); Chaudhry, *Applied Hydraulic Transients*.
+ */
+export function runOpenTanksEnhanced(
+  H1: Float64Array,
+  Q1: Float64Array,
+  Cp: Float64Array,
+  Bp: Float64Array,
+  Cm: Float64Array,
+  Bm: Float64Array,
+  oeZ: Float64Array,
+  oeQT: Float64Array,
+  m: EngineModel,
+  dt: number,
+): void {
+  for (let i = 0; i < m.oeStart.length; i++) {
+    const s = m.oeStart[i];
+    const e = m.oeEnd[i];
+    const CP = Cp[s];
+    const BP = Bp[s];
+    const CM = Cm[e];
+    const BM = Bm[e];
+    const CC = CP + CM;
+    const BB = BP + BM;
+    const aT = m.oeArea[i];
+    const Cf = m.oeCf[i];
+    const zMax = m.oeMax[i];
+    const zMin = m.oeMin[i];
+    const D = dt / (2 * aT);
+    const z0 = oeZ[i];
+    const qt0 = oeQT[i];
+
+    // Free (unclamped) solve from the tracked level z0.
+    const g0 = CC - BB * z0 - BB * D * qt0;
+    let QT = solveThrottledTank(g0, 1 + BB * D, BB * Cf);
+    let H = (CC - QT) / BB;
+    let z = z0 + D * (QT + qt0);
+    let qtNext = QT;
+
+    if (z >= zMax) {
+      // Overflow: pin the level at the standpipe top, re-solve the orifice
+      // against that fixed level (excess inflow spills and is lost).
+      QT = solveThrottledTank(CC - BB * zMax, 1, BB * Cf);
+      H = (CC - QT) / BB;
+      z = zMax;
+      qtNext = 0;
+    } else if (z0 <= zMin && QT <= 0) {
+      // Empty and the line wants to draw: the tank cannot feed → it's inert
+      // (transparent series junction) until the head rises enough to refill it.
+      H = CC / BB;
+      QT = 0;
+      z = zMin;
+      qtNext = 0;
+    } else if (z <= zMin) {
+      // Drained to the bottom this step: clamp the level (the next step's empty
+      // gate stops further feeding); keep this step's H/QT.
+      z = zMin;
+      qtNext = 0;
+    }
+
+    H1[s] = H;
+    H1[e] = H;
+    Q1[s] = CP - H * BP;
+    Q1[e] = H * BM - CM;
+    oeZ[i] = z;
+    oeQT[i] = qtNext;
+  }
+}
+
+/**
  * One-way surge tank at a degree-2 node: an open tank connected through a check
  * valve. Runs after {@link runGeneralJunction} (which normalizes the boundary
  * characteristics). Sign convention matches {@link runOpenProtections}:
