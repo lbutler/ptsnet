@@ -27,6 +27,13 @@ const pipeSel = $<HTMLSelectElement>('pipes');
 const num = (id: string) => parseFloat($<HTMLInputElement>(id).value);
 const hwc = (navigator.hardwareConcurrency as number) || 4;
 
+// Strip a leading byte-order mark (common in uploaded files — EPANET errors on it).
+const cleanInp = () => inpArea.value.replace(/^\uFEFF/, '');
+// The playground is for exploration: skip the strict transient-compatibility
+// check so real networks (and the bundled valve-demo examples) load even when a
+// valve is wide-open / low-loss.
+const lenient = { skipCompatibilityCheck: true } as const;
+
 let results: SimulationResults | undefined;
 let time: Float64Array | undefined;
 
@@ -52,7 +59,7 @@ function selected(sel: HTMLSelectElement): string[] {
 async function loadNetwork(): Promise<void> {
   runBtn.disabled = true;
   try {
-    const sim = await PtsnetSimulation.create({ inp: inpArea.value, settings: { duration: 1, timeStep: 0.1 } });
+    const sim = await PtsnetSimulation.create({ inp: cleanInp(), settings: { duration: 1, timeStep: 0.1, ...lenient } });
     const ss = sim.ss;
     const junctions = ss.node.labels.filter((_, i) => ss.node.type[i] === NODE_JUNCTION);
     fillSelect(valveSel, sim.allValves, true);
@@ -65,6 +72,7 @@ async function loadNetwork(): Promise<void> {
     runBtn.disabled = false;
     sim.dispose();
   } catch (e) {
+    console.error(e);
     netInfo.textContent = '';
     setStatus('Could not load network: ' + (e as Error).message, true);
   }
@@ -74,15 +82,24 @@ async function run(): Promise<void> {
   runBtn.disabled = true;
   setStatus('running…');
   try {
+    const duration = num('duration');
+    const nodes = selected(nodeSel);
+    const pipes = selected(pipeSel);
+    if (valveSel.value && !(num('vstart') < num('vend') && num('vend') <= duration)) {
+      throw new Error('valve operation needs start < end ≤ duration');
+    }
     const sim = await PtsnetSimulation.create({
-      inp: inpArea.value,
+      inp: cleanInp(),
       settings: {
-        duration: num('duration'),
+        duration,
         timeStep: num('dt'),
         defaultWaveSpeed: num('wavespeed'),
         waveSpeedMethod: $<HTMLSelectElement>('method').value as 'optimal' | 'user' | 'critical' | 'dt',
+        ...lenient,
       },
       cavitation: $<HTMLInputElement>('cavitation').checked,
+      // Record only the series we plot — keeps long/large runs light.
+      recording: { nodes, pipes },
       parallel: { workers: hwc },
     });
     if (valveSel.value) {
@@ -113,6 +130,7 @@ async function run(): Promise<void> {
     sim.dispose();
     replot();
   } catch (e) {
+    console.error(e);
     setStatus('Run failed: ' + (e as Error).message, true);
   } finally {
     runBtn.disabled = false;
