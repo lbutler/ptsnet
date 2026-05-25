@@ -3,13 +3,13 @@
  * `PTSNETSettings`, `PTSNETCurve`, `PTSNETElementSettings`) from
  * `simulation/sim.py`, specialized to the serial engine.
  */
-import { SteadyState, ResolvedSettings, PtsnetSettingsInput, COEFF_TOL } from './types';
+import { SteadyState, ResolvedSettings, PtsnetSettingsInput, COEFF_TOL, G } from './types';
 import { loadInitialConditions } from '../epanet/initialConditions';
 import { discretize } from './discretize';
 import { buildEngineModel, EngineModel } from './serialModel';
 import { ParallelEngine } from '../parallel/parallelEngine';
 import { resolveBackend, WorkerBackend } from '../parallel/workerBackend';
-import { CavitationOptions } from './boundaryPhase';
+import { CavitationOptions, PumpTripState } from './boundaryPhase';
 import { checkCompatibility } from './validation';
 import { cubicSpline, linspace, roundHalfEven, pyFloorDiv } from './math';
 import {
@@ -166,6 +166,19 @@ export interface PumpOperationOptions {
   function?: 'linear';
 }
 
+export interface PumpTripOptions {
+  /** Power-failure time [s]; the pump coasts down on its rotating inertia after this. */
+  tripTime: number;
+  /** Polar moment of inertia of the rotating assembly [kg·m²]. */
+  inertia: number;
+  /** Rated rotational speed [rpm]. */
+  ratedSpeed: number;
+  /** Rated efficiency (0–1). Provide this or `ratedPower`; defaults to 0.8 (with a warning). */
+  ratedEfficiency?: number;
+  /** Rated shaft power [W]; used to derive efficiency from the steady operating point. */
+  ratedPower?: number;
+}
+
 function resolveSettings(input: PtsnetSettingsInput = {}): ResolvedSettings {
   const timeStep = input.timeStep ?? 0.01;
   const duration = input.duration ?? 20;
@@ -191,6 +204,7 @@ export class PtsnetSimulation {
 
   private readonly recording: RecordingOptions;
   private readonly curves = new Map<string, PtsnetCurve>();
+  private readonly pumpTrips = new Map<number, PumpTripOptions>();
   private readonly elementSettings: Record<SettingType, ElementSettings>;
   private model?: EngineModel;
   private engine?: ParallelEngine;
@@ -348,6 +362,49 @@ export class PtsnetSimulation {
         linspace(initialSetting, finalSetting, NN),
       );
     }
+  }
+
+  /**
+   * Trip a pump (power failure) at `tripTime`: afterwards its speed coasts down
+   * on the rotating inertia rather than following a schedule, and its discharge
+   * check valve blocks backflow. Requires `inertia` [kg·m²] and `ratedSpeed`
+   * [rpm]; supply `ratedEfficiency` (0–1) or `ratedPower` [W] (else efficiency
+   * defaults to 0.8). A pump cannot have both a trip and a speed schedule.
+   */
+  definePumpTrip(pumpName: string, options: PumpTripOptions): void {
+    const idx = this.ss.pump.index.get(pumpName);
+    if (idx === undefined) throw new Error(`unknown pump '${pumpName}'`);
+    if (options.inertia <= 0) throw new Error('pump trip requires inertia > 0');
+    if (options.ratedSpeed <= 0) throw new Error('pump trip requires ratedSpeed > 0');
+    this.pumpTrips.set(idx, options);
+  }
+
+  /** Build the per-pump trip state (tripStep, K) used by the boundary phase. */
+  private buildPumpTripState(): PumpTripState | undefined {
+    if (this.pumpTrips.size === 0) return undefined;
+    const pump = this.ss.pump;
+    const tripStep = new Int32Array(pump.n).fill(-1);
+    const K = new Float64Array(pump.n);
+    const scheduled = new Set(Array.from(this.elementSettings.pump.elements));
+    for (const [pp, opts] of this.pumpTrips) {
+      if (scheduled.has(pp)) {
+        throw new Error(`pump '${pump.labels[pp]}' cannot have both a trip and a speed schedule`);
+      }
+      const wR = (2 * Math.PI * opts.ratedSpeed) / 60; // rated angular speed [rad/s]
+      let eta = opts.ratedEfficiency;
+      if (eta === undefined && opts.ratedPower !== undefined && opts.ratedPower > 0) {
+        eta = (1000 * G * pump.flowrate[pp] * pump.headLoss[pp]) / opts.ratedPower;
+      }
+      if (eta === undefined || !(eta > 0)) {
+        eta = 0.8;
+        if (this.settings.warningsOn) {
+          console.warn(`ptsnet: pump '${pump.labels[pp]}' trip efficiency not given; assuming 0.8`);
+        }
+      }
+      tripStep[pp] = Math.round(opts.tripTime / this.settings.timeStep);
+      K[pp] = (1000 * G) / (eta * opts.inertia * wR * wR);
+    }
+    return { tripStep, K };
   }
 
   addBurst(
@@ -525,6 +582,7 @@ export class PtsnetSimulation {
       this.settings.timeSteps,
       this.recording,
       this.cavitationOptions,
+      this.buildPumpTripState(),
     );
     this.t = 1;
     this.initialized = true;

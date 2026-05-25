@@ -37,6 +37,7 @@ import {
   runBoundaryPhase,
   CavState,
   CavitationOptions,
+  PumpTripState,
 } from './../core/boundaryPhase';
 import { WorkerBackend, WorkerHandle } from './workerBackend';
 import { runInteriorStep, runInteriorStepCav } from './../core/kernels';
@@ -196,6 +197,7 @@ export class ParallelEngine {
     timeSteps: number,
     recording: RecordingOptions = {},
     cavitation?: CavitationOptions,
+    private readonly pumpTrip?: PumpTripState,
   ) {
     const n = model.numPoints;
     this.n = n;
@@ -515,6 +517,7 @@ export class ParallelEngine {
       this.Cm,
       this.Bm,
       cavState,
+      this.pumpTrip,
     );
     if (this.cav) {
       const gasVol = this.gasVol!;
