@@ -82,6 +82,11 @@ sim.addAirValve(nodeName, { inflowArea, outflowArea }); // combination air/vacuu
 sim.addSurgeReliefValve(nodeName, { setpoint, area, openTime, closeTime, reseat });
                              // pressure-relief valve: opens above the gauge-head setpoint,
                              // vents to atmosphere, recloses below reseat (defaults to setpoint)
+sim.addOneWaySurgeTank(nodeName, { tankArea, initialLevel, bottomLevel, refillArea });
+                             // open tank + check valve: feeds the line on a down-surge
+                             // (caps it near the tank level), shut on the up-surge so it
+                             // passes through; drains to bottomLevel, optional slow refill.
+                             // initialLevel defaults to the steady head, bottomLevel to the node elevation
 ```
 
 Column separation and unsteady friction are `create` options, not operations:

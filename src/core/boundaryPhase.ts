@@ -16,6 +16,7 @@ import {
   runPumpTrip,
   runOpenProtections,
   runClosedProtections,
+  runOneWayTanks,
   runAirValves,
   runSrv,
 } from './kernels';
@@ -119,12 +120,16 @@ export interface BoundaryState {
   closedHT0: Float64Array;
   closedVA: Float64Array;
   closedC: Float64Array;
+  owtZ: Float64Array; // one-way surge-tank water level [m]
+  owtQT: Float64Array; // one-way surge-tank inflow (previous step) [m³/s]
   airVol: Float64Array; // air-valve pocket volume [m³] (0 = shut)
   airMass: Float64Array; // air-valve pocket air mass [kg]
   srvTau: Float64Array; // surge-relief-valve opening fraction [0,1] (0 = shut)
 }
 
 export function makeBoundaryState(model: EngineModel): BoundaryState {
+  const owtZ = new Float64Array(model.owtStart.length);
+  owtZ.set(model.owtInitLevel); // seed each tank at its initial water level
   return {
     E1: new Float64Array(model.numJip),
     D1: new Float64Array(model.numJip),
@@ -136,6 +141,8 @@ export function makeBoundaryState(model: EngineModel): BoundaryState {
     closedHT0: new Float64Array(model.closedStart.length),
     closedVA: new Float64Array(model.closedStart.length),
     closedC: new Float64Array(model.closedStart.length),
+    owtZ,
+    owtQT: new Float64Array(model.owtStart.length),
     airVol: new Float64Array(model.airStart.length),
     airMass: new Float64Array(model.airStart.length),
     srvTau: new Float64Array(model.srvStart.length),
@@ -235,6 +242,9 @@ export function runBoundaryPhase(
       model,
       timeStep,
     );
+  }
+  if (model.owtStart.length > 0) {
+    runOneWayTanks(H1, Q1, Cp, Bp, Cm, Bm, st.owtZ, st.owtQT, model, timeStep);
   }
   if (model.airStart.length > 0) {
     runAirValves(H1, Q1, Cp, Bp, Cm, Bm, st.airVol, st.airMass, ss.node.elevation, model, timeStep);

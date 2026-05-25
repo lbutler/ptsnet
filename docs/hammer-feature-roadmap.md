@@ -52,7 +52,7 @@ Surge-Relief Valves, Transient Forces.
 
 | Status | Feature | Importance | Effort | Validate against |
 | --- | --- | --- | --- | --- |
-| [ ] | **One-way surge tank (feed tank + check valve)** | Med | S–M | W&S; Chaudhry surge-tank examples |
+| [x] | **One-way surge tank (feed tank + check valve)** — open tank + check valve at a degree-2 node via `addOneWaySurgeTank`; feeds the line when local head drops below the tank level (caps the down-surge), shut on the up-surge (passes through), drains to a bottom level with an optional slow refill orifice | Med | S–M | W&S; Chaudhry surge-tank examples |
 | [ ] | **Four-quadrant pump characteristics (reverse flow/spin)** | Med | L | Suter (1966) / Marchal–Flesch–Suter data; W&S tables |
 | [ ] | **Surge-anticipator valve (SAV)** | Med | M | W&S; HAMMER surge-relief docs |
 | [ ] | **Transient forces (unbalanced thrust on pipe runs)** | Med | M | HAMMER Transient Forces; thrust-block design refs |

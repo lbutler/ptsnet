@@ -27,8 +27,10 @@ combination air/vacuum valves (finite-orifice); sub-atmospheric single-valve fix
 unsteady (Brunone) friction (Vítkovský instantaneous-acceleration term in the
 interior stencil; composes with cavitation); surge-relief valve (SRV:
 orifice-to-atmosphere at a degree-2 node, gauge-head setpoint with finite
-open/close rates + optional reseat).
-**Next on the roadmap: one-way surge tank.**
+open/close rates + optional reseat); one-way surge tank (open tank + check valve
+at a degree-2 node: feeds the line on the down-surge, shut on the up-surge, drains
+to a bottom level with an optional refill orifice).
+**Next on the roadmap: four-quadrant pump characteristics (or surge-anticipator valve).**
 
 ## Architecture & where the code lives
 

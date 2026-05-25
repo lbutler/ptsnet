@@ -64,6 +64,13 @@ export interface EngineModel {
   closedHeight: Float64Array;
   closedWaterLevel: Float64Array;
   closedNode: Int32Array;
+  // One-way surge tanks (point pairs; start has C+, end has C-) + tank geometry.
+  owtStart: Int32Array;
+  owtEnd: Int32Array;
+  owtArea: Float64Array;
+  owtInitLevel: Float64Array; // initial water level (state seed) and refill "full" cap
+  owtBottom: Float64Array; // empty level (stops feeding at/below it)
+  owtKr: Float64Array; // refill orifice Cd·A·√(2g) (0 = no refill)
   // Check valves (point pairs; start has C+ / upstream pipe, end has C- / downstream pipe).
   checkStart: Int32Array;
   checkEnd: Int32Array;
@@ -332,6 +339,27 @@ export function buildEngineModel(
     }
   }
 
+  // --- One-way surge tanks (open tank + check valve at a degree-2 node). ---
+  const owtStart: number[] = [];
+  const owtEnd: number[] = [];
+  const owtArea: number[] = [];
+  const owtInitLevel: number[] = [];
+  const owtBottom: number[] = [];
+  const owtKr: number[] = [];
+  for (const owt of ss.oneWaySurgeTank.values()) {
+    const refs = boundaryAtNode[owt.node];
+    const u = refs.find((r) => r.isU);
+    const d = refs.find((r) => !r.isU);
+    if (u && d) {
+      owtStart.push(u.point);
+      owtEnd.push(d.point);
+      owtArea.push(owt.area);
+      owtInitLevel.push(owt.initialLevel);
+      owtBottom.push(owt.bottomLevel);
+      owtKr.push(owt.refillCoeff * owt.refillArea * Math.sqrt(2 * G));
+    }
+  }
+
   // --- Check valves. A check valve is a pipe property (EPANET CV pipe or added
   // via the API). It's enforced at one end node of the pipe, reusing the
   // degree-2 series-junction solve: the check sits at an end node that joins
@@ -355,6 +383,7 @@ export function buildEngineModel(
   for (const prot of ss.openProtection.values()) surgeNode.add(prot.node);
   for (const prot of ss.closedProtection.values()) surgeNode.add(prot.node);
   for (const srv of ss.surgeReliefValve.values()) surgeNode.add(srv.node);
+  for (const owt of ss.oneWaySurgeTank.values()) surgeNode.add(owt.node);
 
   const placeCheck = (n: number): boolean => {
     if (
@@ -476,6 +505,12 @@ export function buildEngineModel(
     closedHeight: Float64Array.from(closedHeight),
     closedWaterLevel: Float64Array.from(closedWaterLevel),
     closedNode: Int32Array.from(closedNode),
+    owtStart: Int32Array.from(owtStart),
+    owtEnd: Int32Array.from(owtEnd),
+    owtArea: Float64Array.from(owtArea),
+    owtInitLevel: Float64Array.from(owtInitLevel),
+    owtBottom: Float64Array.from(owtBottom),
+    owtKr: Float64Array.from(owtKr),
     checkStart: Int32Array.from(checkStart),
     checkEnd: Int32Array.from(checkEnd),
     airStart: Int32Array.from(airStart),
