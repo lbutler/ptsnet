@@ -210,8 +210,18 @@ Cross-Origin-Embedder-Policy: require-corp
 
 If `SharedArrayBuffer`-backed workers are unavailable (a page without those
 headers, or no `worker_threads`), `create()` **throws** — there is no serial
-fallback. A runnable demo is in [`examples/browser`](examples/browser)
-(`npm run demo`, which sets those headers).
+fallback.
+
+### Interactive playground
+
+```bash
+npm run demo   # serves examples/browser with the required COOP/COEP headers
+```
+
+A browser playground for exploring the engine: pick a bundled example network (or
+load your own `.inp`), set the run parameters (duration, time step, wave speed,
+cavitation), choose a transient event (valve closure or pump trip), run it, and
+plot node-head and pipe-flow series. No map — just controls and charts.
 
 On BWSN_F (12,530 nodes, ~3.2 M discretization points), per-step cost on a
 4-core machine:
