@@ -33,7 +33,8 @@ Surge-Relief Valves, Transient Forces.
   **closed surge tank / gas vessel / air chamber** (polytropic) via `addSurgeProtection`.
 - **Column separation / cavitation (DGCM)** at interior points, valves, and junction
   nodes, with per-element diagnostics + validity report.
-- Steady (Darcy–Weisbach / Hazen–Williams) friction.
+- Steady (Darcy–Weisbach / Hazen–Williams) friction, plus optional quasi-steady
+  friction (recompute `f` from the instantaneous velocity) and Brunone unsteady friction.
 - Recording subsets, min/max envelopes, streaming / progress / abort.
 
 ---
@@ -56,7 +57,7 @@ Surge-Relief Valves, Transient Forces.
 | [ ] | **Four-quadrant pump characteristics (reverse flow/spin)** | Med | L | Suter (1966) / Marchal–Flesch–Suter data; W&S tables |
 | [ ] | **Surge-anticipator valve (SAV)** | Med | M | W&S; HAMMER surge-relief docs |
 | [ ] | **Transient forces (unbalanced thrust on pipe runs)** | Med | M | HAMMER Transient Forces; thrust-block design refs |
-| [ ] | **Quasi-steady friction (recompute f from instantaneous V)** | Med | S | Standard MOC texts; cross-check vs steady & Brunone |
+| [x] | **Quasi-steady friction (recompute f from instantaneous V)** — `quasiSteadyFriction` recomputes the Darcy `f` each step from the instantaneous velocity via Swamee–Jain (Colebrook), anchored to the steady operating point (effective `ε/D` backed out per pipe so `f(Re₀)=f_steady`); off by default, composes with cavitation/Brunone | Med | S | Standard MOC texts; cross-check vs steady & Brunone |
 | [x] | **Simple/two-way surge-tank enhancements (orifice loss, height limits, overflow)** — `addSurgeProtection(..., 'open', ...)` now takes a throttling orifice (head loss `Cf·Q\|Q\|`), a standpipe top (`maxLevel`, overflow/spill), and an empty level (`minLevel`, runs dry → inert until refilled); plain open tanks stay byte-identical on the original kernel | Med | S | W&S throttled surge tank |
 
 ## Tier 3 — Lower / niche (consider skipping)
@@ -131,9 +132,16 @@ straight pipe run between bends from the pressure-time history (for restraint/th
 design). Mostly post-processing of recorded pressures, but needs run/bend geometry,
 which the current model may not carry yet.
 
-**Quasi-steady friction.** Recompute the friction factor each step from the
-instantaneous velocity (Colebrook/Swamee–Jain or H–W) instead of a frozen `f`. Cheap
-and a modest accuracy gain; a stepping stone before Brunone.
+**Quasi-steady friction.** *(Done.)* `quasiSteadyFriction` recomputes the Darcy
+friction factor each step from the instantaneous velocity via the explicit
+Swamee–Jain (Colebrook) law instead of a frozen `f`. It is **anchored** to the
+steady operating point — per pipe an effective relative roughness `ε/D` is backed
+out from `(f_steady, Re₀)` so `f(Re₀) = f_steady` exactly — which keeps it
+formula-agnostic (works whether the `.inp` used H–W or D–W), needs no extra input,
+and leaves a no-transient run at steady state. Off by default (the steady-friction
+path stays byte-identical), worker-count invariant, and composes with column
+separation and Brunone unsteady friction. A cheap, modest accuracy gain and a
+stepping stone before Brunone.
 
 **Simple surge-tank enhancements.** *(Done.)* The open tank
 (`addSurgeProtection(..., 'open', ...)`) takes an optional throttling orifice at
@@ -169,5 +177,5 @@ particular only matter for hydropower, not water distribution.
 5. **Surge-relief valve**, then **one-way surge tank**, then **SAV** (M / S–M / M).
 6. **Four-quadrant pump** + **transient forces** as accuracy/output follow-ups.
 
-Quick wins to slot in opportunistically: **quasi-steady friction**, **simple
-surge-tank enhancements**, **valve curve library** (all S).
+Quick wins to slot in opportunistically: **simple surge-tank enhancements**,
+**valve curve library** (both S) — **quasi-steady friction** now shipped.

@@ -31,7 +31,10 @@ open/close rates + optional reseat); one-way surge tank (open tank + check valve
 at a degree-2 node: feeds the line on the down-surge, shut on the up-surge, drains
 to a bottom level with an optional refill orifice); open surge-tank enhancements
 (throttling-orifice head loss, standpipe overflow at a max level, and a min/empty
-level that runs the tank dry — plain open tanks stay on the original kernel).
+level that runs the tank dry — plain open tanks stay on the original kernel);
+quasi-steady friction (recompute Darcy `f` each step from the instantaneous
+velocity via Swamee–Jain, anchored to the steady operating point; composes with
+cavitation/Brunone, default path byte-identical).
 **Next on the roadmap: four-quadrant pump characteristics (or surge-anticipator valve).**
 
 ## Architecture & where the code lives

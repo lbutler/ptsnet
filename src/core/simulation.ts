@@ -11,6 +11,7 @@ import { ParallelEngine } from '../parallel/parallelEngine';
 import { resolveBackend, WorkerBackend } from '../parallel/workerBackend';
 import { CavitationOptions, PumpTripState } from './boundaryPhase';
 import { UnsteadyFrictionOptions } from './unsteadyFriction';
+import { QuasiSteadyFrictionOptions } from './quasiSteadyFriction';
 import { checkCompatibility } from './validation';
 import { cubicSpline, linspace, roundHalfEven, pyFloorDiv } from './math';
 import {
@@ -156,6 +157,14 @@ export interface SimulationCreateOptions {
    * shear-decay coefficient; pass options to set it explicitly.
    */
   unsteadyFriction?: boolean | UnsteadyFrictionOptions;
+  /**
+   * Enable quasi-steady friction — recompute the Darcy friction factor `f` each
+   * step from the instantaneous velocity (Swamee–Jain / Colebrook) instead of
+   * freezing it at the steady-state value. Anchored to the steady operating
+   * point, so it needs no extra input and a no-transient run stays steady.
+   * `true` uses defaults; pass options to set the kinematic viscosity.
+   */
+  quasiSteadyFriction?: boolean | QuasiSteadyFrictionOptions;
 }
 
 /** Streaming / progress / cancellation options for {@link PtsnetSimulation.run}. */
@@ -256,6 +265,7 @@ export class PtsnetSimulation {
   private workers = 1;
   private cavitationOptions?: CavitationOptions;
   private unsteadyFrictionOptions?: UnsteadyFrictionOptions;
+  private quasiSteadyFrictionOptions?: QuasiSteadyFrictionOptions;
   private t = 0;
   private initialized = false;
   private updatedSettings = false;
@@ -304,6 +314,13 @@ export class PtsnetSimulation {
         throw new Error('unsteadyFriction.viscosity must be > 0');
       }
       sim.unsteadyFrictionOptions = uf;
+    }
+    if (options.quasiSteadyFriction) {
+      const qf = options.quasiSteadyFriction === true ? {} : options.quasiSteadyFriction;
+      if (qf.viscosity !== undefined && !(qf.viscosity > 0)) {
+        throw new Error('quasiSteadyFriction.viscosity must be > 0');
+      }
+      sim.quasiSteadyFrictionOptions = qf;
     }
     return sim;
   }
@@ -843,6 +860,7 @@ export class PtsnetSimulation {
       this.cavitationOptions,
       this.buildPumpTripState(),
       this.unsteadyFrictionOptions,
+      this.quasiSteadyFrictionOptions,
     );
     this.t = 1;
     this.initialized = true;

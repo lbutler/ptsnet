@@ -41,6 +41,8 @@ export type {
 export type { CavitationOptions } from './core/boundaryPhase';
 export type { UnsteadyFrictionOptions } from './core/unsteadyFriction';
 export { brunoneCoefficient } from './core/unsteadyFriction';
+export type { QuasiSteadyFrictionOptions } from './core/quasiSteadyFriction';
+export { swameeJain } from './core/quasiSteadyFriction';
 export type { CavitationReport, CavityElementReport } from './core/results';
 export { loadInitialConditions } from './epanet/initialConditions';
 export { FlowUnit, HydParam, toSi } from './epanet/units';
