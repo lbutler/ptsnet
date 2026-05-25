@@ -44,7 +44,7 @@ Surge-Relief Valves, Transient Forces.
 | --- | --- | --- | --- | --- |
 | [x] | **Pump trip with rotational inertia (coast-down)** — forward-quadrant `definePumpTrip` + forward-only pumps (discharge check valve) shipped; four-quadrant reverse rotation/runaway still the Tier-2 item below | High | M | W&S pump-trip examples; Chaudhry; HAMMER sample models |
 | [x] | **Check valve (closes on flow reversal)** — ideal (instant) model shipped, pipe-based + auto-imports EPANET CV pipes; reverse-velocity *slam* dynamics and multi-pipe-junction placement still follow-ups | High | S–M | Thorley, *Fluid Transients in Pipeline Systems*; W&S |
-| [ ] | **Combination air valve (air/vacuum, CAV)** | High | M–L | W&S air-valve; AWWA M51; HAMMER CAV (Comolet 1961) |
+| [x] | **Combination air valve (air/vacuum, CAV)** — finite-orifice admission + expulsion (compressible flow, isothermal pocket) shipped via `addAirValve`; multi-orifice CAV transitions a possible refinement | High | M–L | W&S air-valve; AWWA M51; HAMMER CAV (Comolet 1961) |
 | [ ] | **Unsteady (transient) friction — Brunone** | Med–High | M | Bergant, Simpson & Vitkovsky (2001) — has experimental data |
 | [ ] | **Surge-relief valve (SRV, opens on overpressure)** | Med–High | M | W&S; Chaudhry; manufacturer Cv curves |
 

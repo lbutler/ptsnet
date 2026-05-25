@@ -490,3 +490,110 @@ export function runClosedProtections(
     QT0[i] = QT1;
   }
 }
+
+const RHO_W = 1000; // water density [kg/m³]
+const RHO_AIR0 = 1.293; // air density at standard conditions [kg/m³]
+const GAMMA_AIR = 1.4; // isentropic exponent of air
+
+/**
+ * Combination air/vacuum valve at a degree-2 node. Admits air through the inlet
+ * orifice when the node pressure falls below atmospheric (vacuum breaking, which
+ * limits the down-surge / column separation) and expels it through the outlet
+ * orifice on repressurization (the trapped air can compress above atmospheric and
+ * cause an "air slam" surge on rejoining). Compressible orifice flow
+ * (subsonic→choked at p_r = 0.528) with an isothermal air pocket `p∀ = mRT`;
+ * runs after {@link runGeneralJunction} and overrides the node while open.
+ *
+ * Each step solves, for the node head H, the balance between the gas-law pocket
+ * volume `(m0 + Δt·ṁ(p))·RT0/p` and the water-continuity volume
+ * `∀0 + Δt·(H·BB − CC)`. The residual is monotonic in H, so it's bracketed by
+ * bisection. State (`airVol`, `airMass`) persists across steps.
+ *
+ * Reference: Wylie & Streeter, *Fluid Transients in Systems* (air-inlet valves).
+ */
+export function runAirValves(
+  H1: Float64Array,
+  Q1: Float64Array,
+  Cp: Float64Array,
+  Bp: Float64Array,
+  Cm: Float64Array,
+  Bm: Float64Array,
+  airVol: Float64Array,
+  airMass: Float64Array,
+  Z: Float64Array,
+  m: EngineModel,
+  dt: number,
+): void {
+  const P0 = RHO_W * G * HB; // atmospheric pressure [Pa]
+  const RT0 = P0 / RHO_AIR0; // R·T0 [m²/s²]
+  const g1 = GAMMA_AIR;
+  const rCrit = (2 / (g1 + 1)) ** (g1 / (g1 - 1)); // ≈ 0.528
+  const choke = Math.sqrt((g1 / RT0) * (2 / (g1 + 1)) ** ((g1 + 1) / (g1 - 1)));
+  const sub = (2 * g1) / ((g1 - 1) * RT0);
+
+  // Net air mass flow into the pocket [kg/s] (+admit, −expel) at absolute pressure p.
+  const massFlow = (p: number, Ain: number, Aout: number, Cin: number, Cout: number): number => {
+    if (p < P0) {
+      const r = p / P0;
+      const flux = r <= rCrit ? P0 * choke : P0 * Math.sqrt(sub * (r ** (2 / g1) - r ** ((g1 + 1) / g1)));
+      return Cin * Ain * flux;
+    }
+    if (p > P0) {
+      const r = P0 / p;
+      const flux = r <= rCrit ? p * choke : p * Math.sqrt(sub * (r ** (2 / g1) - r ** ((g1 + 1) / g1)));
+      return -Cout * Aout * flux;
+    }
+    return 0;
+  };
+
+  for (let i = 0; i < m.airStart.length; i++) {
+    const s = m.airStart[i];
+    const e = m.airEnd[i];
+    const z = Z[m.airNode[i]];
+    const CC = Cp[s] + Cm[e];
+    const BB = Bp[s] + Bm[e];
+    const hJunc = CC / BB; // degree-2 series-junction head (valve shut)
+    const v0 = airVol[i];
+    const m0 = airMass[i];
+    const Ain = m.airInArea[i];
+    const Aout = m.airOutArea[i];
+    const Cin = m.airInCoeff[i];
+    const Cout = m.airOutCoeff[i];
+
+    if (v0 <= 0 && m0 <= 0 && hJunc - z >= 0) continue; // shut & pressurized: junction stands
+
+    // g(H) = gas-law volume − water-continuity volume; monotonically decreasing in H.
+    const resid = (H: number): number => {
+      const p = RHO_W * G * (H - z + HB);
+      const m1 = Math.max(0, m0 + dt * massFlow(p, Ain, Aout, Cin, Cout));
+      return (m1 * RT0) / p - (v0 + dt * (H * BB - CC));
+    };
+    let lo = z - HB + 1e-3; // p just above vacuum
+    let hi = z + 1000;
+    for (let k = 0; k < 60; k++) {
+      const mid = 0.5 * (lo + hi);
+      if (resid(mid) > 0) lo = mid;
+      else hi = mid;
+    }
+    const H = 0.5 * (lo + hi);
+    const p = RHO_W * G * (H - z + HB);
+    const m1 = m0 + dt * massFlow(p, Ain, Aout, Cin, Cout);
+
+    if (m1 <= 0) {
+      // Air fully expelled: valve shuts, node repressurizes as a plain junction.
+      airVol[i] = 0;
+      airMass[i] = 0;
+      H1[s] = hJunc;
+      H1[e] = hJunc;
+      Q1[s] = Cp[s] - hJunc * Bp[s];
+      Q1[e] = hJunc * Bm[e] - Cm[e];
+    } else {
+      airMass[i] = m1;
+      airVol[i] = (m1 * RT0) / p;
+      H1[s] = H;
+      H1[e] = H;
+      Q1[s] = Cp[s] - H * Bp[s];
+      Q1[e] = H * Bm[e] - Cm[e];
+    }
+  }
+}

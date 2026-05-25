@@ -67,6 +67,14 @@ export interface EngineModel {
   // Check valves (point pairs; start has C+ / upstream pipe, end has C- / downstream pipe).
   checkStart: Int32Array;
   checkEnd: Int32Array;
+  // Air valves (degree-2 node; start has C+, end has C-) + orifice params + node elevation.
+  airStart: Int32Array;
+  airEnd: Int32Array;
+  airNode: Int32Array;
+  airInArea: Float64Array;
+  airOutArea: Float64Array;
+  airInCoeff: Float64Array;
+  airOutCoeff: Float64Array;
 }
 
 interface BoundaryRef {
@@ -369,6 +377,29 @@ export function buildEngineModel(
     );
   }
 
+  // --- Air valves (combination air/vacuum valve at a degree-2 node). ---
+  const airStart: number[] = [];
+  const airEnd: number[] = [];
+  const airNode: number[] = [];
+  const airInArea: number[] = [];
+  const airOutArea: number[] = [];
+  const airInCoeff: number[] = [];
+  const airOutCoeff: number[] = [];
+  for (const av of ss.airValve.values()) {
+    const refs = boundaryAtNode[av.node];
+    const u = refs.find((r) => r.isU);
+    const d = refs.find((r) => !r.isU);
+    if (u && d) {
+      airStart.push(u.point);
+      airEnd.push(d.point);
+      airNode.push(av.node);
+      airInArea.push(av.inflowArea);
+      airOutArea.push(av.outflowArea);
+      airInCoeff.push(av.inCoeff);
+      airOutCoeff.push(av.outCoeff);
+    }
+  }
+
   return {
     numPoints,
     B,
@@ -412,5 +443,12 @@ export function buildEngineModel(
     closedNode: Int32Array.from(closedNode),
     checkStart: Int32Array.from(checkStart),
     checkEnd: Int32Array.from(checkEnd),
+    airStart: Int32Array.from(airStart),
+    airEnd: Int32Array.from(airEnd),
+    airNode: Int32Array.from(airNode),
+    airInArea: Float64Array.from(airInArea),
+    airOutArea: Float64Array.from(airOutArea),
+    airInCoeff: Float64Array.from(airInCoeff),
+    airOutCoeff: Float64Array.from(airOutCoeff),
   };
 }

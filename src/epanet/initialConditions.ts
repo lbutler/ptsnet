@@ -383,6 +383,7 @@ export async function loadInitialConditions(
       valve: valves,
       openProtection: new Map(),
       closedProtection: new Map(),
+      airValve: new Map(),
       linksForNode,
     };
 
