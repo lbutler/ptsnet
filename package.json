@@ -1,5 +1,5 @@
 {
-  "name": "ptsnet",
+  "name": "@epanet-js/ptsnet",
   "version": "0.2.0",
   "description": "Transient simulation in water networks (Method of Characteristics) — TypeScript port of PTSNET",
   "type": "module",
@@ -17,6 +17,9 @@
     "dist",
     "examples"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "vite build && tsc -p tsconfig.build.json --emitDeclarationOnly",
     "test": "vitest run",

@@ -27,7 +27,7 @@ transient solution is computed by a self-contained MOC engine that runs on a
 ## Installation
 
 ```sh
-npm install ptsnet epanet-js
+npm install @epanet-js/ptsnet epanet-js
 ```
 
 `epanet-js` is a peer/runtime dependency (it ships the EPANET WASM engine and is
@@ -36,7 +36,7 @@ kept external from the bundle).
 ## Usage
 
 ```ts
-import { PtsnetSimulation } from 'ptsnet';
+import { PtsnetSimulation } from '@epanet-js/ptsnet';
 
 // `inp` is the text of an EPANET .inp file.
 const sim = await PtsnetSimulation.create({
@@ -497,40 +497,9 @@ it you must restore the Python package from history; see
 
 ## Publishing to npm (`@epanet-js/ptsnet`)
 
-This package is published to the public npm registry under the **`@epanet-js`**
-scope. Scoped packages are **private by default**, so the steps below explicitly
-publish with *public* access.
-
-### One-time setup
-
-1. **npm account & scope access.** You need an npm account that belongs to the
-   `epanet-js` organization with *publish* rights.
-   - If the org doesn't exist yet, create it at
-     <https://www.npmjs.com/org/create> with the name `epanet-js` — this claims
-     the `@epanet-js` scope. (The free plan is fine for *public* packages.)
-   - Otherwise, ask an existing org owner to add you as a member.
-2. **Enable 2FA** on your npm account (recommended; npm may prompt for a one-time
-   code at publish time).
-3. **Rename the package.** In [`package.json`](package.json), change the name and
-   add a `publishConfig` so scoped publishes default to public:
-   ```jsonc
-   {
-     "name": "@epanet-js/ptsnet",
-     "publishConfig": { "access": "public" }
-   }
-   ```
-   The `publishConfig.access: "public"` line is what lets a *scoped* package
-   publish to the public registry (equivalent to passing `--access public` on
-   every publish). Without it, npm tries to publish privately and fails unless
-   you're on a paid plan.
-4. **Update the references to the old unscoped name** so the docs match what users
-   actually install:
-   - the install command in [Installation](#installation):
-     `npm install ptsnet …` → `npm install @epanet-js/ptsnet …`
-   - the import in the usage examples:
-     `from 'ptsnet'` → `from '@epanet-js/ptsnet'`
-
-### Each release
+Released to the public npm registry under the `@epanet-js` scope. `package.json`
+already sets `"name": "@epanet-js/ptsnet"` and `"publishConfig": { "access":
+"public" }`, so a plain `npm publish` goes out publicly.
 
 ```sh
 # 1. Confirm you're logged in to the right account
@@ -550,8 +519,6 @@ npm publish --dry-run
 
 # 5. Publish (the build runs automatically via the prepublishOnly script)
 npm publish          # add --otp=<code> if 2FA prompts you
-#    If you skipped the publishConfig step above, publish with:
-#    npm publish --access public
 
 # 6. Push the version commit and tag
 git push --follow-tags
@@ -560,10 +527,6 @@ git push --follow-tags
 After it lands, verify at
 <https://www.npmjs.com/package/@epanet-js/ptsnet> and smoke-test a clean
 install in an empty directory: `npm install @epanet-js/ptsnet epanet-js`.
-
-> **First-publish note:** the *very first* publish of a brand-new scoped package
-> must be public-access (via `publishConfig.access` or `--access public`).
-> Subsequent releases inherit the public setting.
 
 <!-- Cite Us -->
 ## Cite Us

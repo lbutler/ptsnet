@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { PtsnetSimulation } from 'ptsnet';
+import { PtsnetSimulation } from '@epanet-js/ptsnet';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const inp = readFileSync(resolve(here, 'TNET3.inp'), 'utf8');
