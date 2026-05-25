@@ -22,8 +22,25 @@ import {
   CavitationReport,
 } from './results';
 
-const BUTTERFLY_X = [1, 0.8, 0.6, 0.4, 0.2, 0];
-const BUTTERFLY_Y = [0.067, 0.044, 0.024, 0.011, 0.004, 0.0];
+/** Built-in valve characteristic types selectable via `defineValveOperation`. */
+export type ValveCharacteristic = 'butterfly' | 'globe' | 'gate' | 'ball' | 'needle';
+
+/**
+ * Inherent characteristic curves for common valve types: `X` = fraction open
+ * (1 = fully open, descending), `Y` = relative flow coefficient (∝ Cv, larger
+ * when more open). The kernel uses only the curve *shape* — the absolute scale is
+ * normalized to the steady-state loss coefficient when the curve is assigned
+ * (`assignCurveTo`). Shapes follow standard inherent characteristics (Wylie &
+ * Streeter; ISA / Crane TP-410): gate ≈ quick-opening, globe/needle ≈ linear,
+ * ball ≈ equal-percentage, butterfly between linear and equal-percentage.
+ */
+export const VALVE_CURVES: Record<ValveCharacteristic, { X: number[]; Y: number[] }> = {
+  butterfly: { X: [1, 0.8, 0.6, 0.4, 0.2, 0], Y: [0.067, 0.044, 0.024, 0.011, 0.004, 0.0] },
+  gate: { X: [1, 0.8, 0.6, 0.4, 0.2, 0], Y: [1.0, 0.97, 0.9, 0.78, 0.55, 0.0] },
+  globe: { X: [1, 0.8, 0.6, 0.4, 0.2, 0], Y: [1.0, 0.8, 0.62, 0.45, 0.28, 0.0] },
+  needle: { X: [1, 0.8, 0.6, 0.4, 0.2, 0], Y: [1.0, 0.8, 0.6, 0.4, 0.2, 0.0] },
+  ball: { X: [1, 0.8, 0.6, 0.4, 0.2, 0], Y: [1.0, 0.62, 0.35, 0.18, 0.08, 0.0] },
+};
 
 type CurveType = 'valve' | 'pump';
 type SettingType = 'valve' | 'pump' | 'burst' | 'demand';
@@ -162,7 +179,8 @@ export interface ValveOperationOptions {
   finalSetting: number;
   startTime?: number;
   endTime?: number;
-  valveType?: 'butterfly';
+  /** Valve characteristic curve (default `'butterfly'`). See {@link VALVE_CURVES}. */
+  valveType?: ValveCharacteristic;
   function?: 'linear';
 }
 
@@ -365,14 +383,17 @@ export class PtsnetSimulation {
       valveType = 'butterfly',
       function: fn = 'linear',
     } = options;
-    if (valveType !== 'butterfly') throw new Error("only 'butterfly' valves are supported");
+    const curve = VALVE_CURVES[valveType];
+    if (curve === undefined) {
+      throw new Error(`unknown valveType '${valveType}' (expected one of: ${Object.keys(VALVE_CURVES).join(', ')})`);
+    }
     if (fn !== 'linear') throw new Error("only 'linear' transient functions are supported");
     if (startTime >= endTime) throw new Error('End time must be greater than start time');
     if (!(initialSetting >= 0 && initialSetting <= 1 && finalSetting >= 0 && finalSetting <= 1)) {
       throw new Error('Setting values must be between [0, 1]');
     }
 
-    this.addCurve(valveType, 'valve', BUTTERFLY_X, BUTTERFLY_Y);
+    this.addCurve(valveType, 'valve', curve.X, curve.Y);
     const names = typeof valveNames === 'string' ? [valveNames] : valveNames;
     this.assignCurveTo(valveType, names);
     const NN = pyFloorDiv(endTime - startTime, this.settings.timeStep);
@@ -804,7 +825,7 @@ export class PtsnetSimulation {
     const unassigned: string[] = [];
     for (let i = 0; i < valve.n; i++) if (valve.curveIndex[i] === -1) unassigned.push(valve.labels[i]);
     if (unassigned.length > 0) {
-      this.addCurve('butterfly', 'valve', BUTTERFLY_X, BUTTERFLY_Y);
+      this.addCurve('butterfly', 'valve', VALVE_CURVES.butterfly.X, VALVE_CURVES.butterfly.Y);
       this.assignCurveTo('butterfly', unassigned);
     }
 

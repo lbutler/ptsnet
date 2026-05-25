@@ -26,8 +26,8 @@ Surge-Relief Valves, Transient Forces.
 - MOC engine (SharedArrayBuffer worker pool / inline), steady state via `epanet-js`.
 - Reservoirs, tanks, junctions; pipes with per-pipe wave speed and time-step control.
 - Pumps (single + inline): head–flow curve, **speed setting + ramped pump operations**.
-- Valves (single/end + inline): loss curves (butterfly default), **ramped open/close
-  + arbitrary setting schedules**.
+- Valves (single/end + inline): characteristic-curve library (butterfly default +
+  globe/gate/ball/needle), **ramped open/close + arbitrary setting schedules**.
 - Transient demand changes and bursts (leak opening).
 - **Surge protection: open surge tank** (standpipe, vents to atmosphere) and
   **closed surge tank / gas vessel / air chamber** (polytropic) via `addSurgeProtection`.
@@ -63,7 +63,7 @@ Surge-Relief Valves, Transient Forces.
 
 | Status | Feature | Importance | Effort | Validate against |
 | --- | --- | --- | --- | --- |
-| [ ] | **Valve characteristic-curve library (globe/gate/ball/needle Cv vs % open)** | Low–Med | S | Manufacturer/ISA Cv data; W&S valve curves |
+| [x] | **Valve characteristic-curve library (globe/gate/ball/needle Cv vs % open)** — built-in inherent characteristics (gate ≈ quick-opening, globe/needle ≈ linear, ball ≈ equal-percentage) selectable via `defineValveOperation({ valveType })`; butterfly stays the default and is byte-identical | Low–Med | S | Manufacturer/ISA Cv data; W&S valve curves |
 | [ ] | **Air-release / wave-speed-reduction factor (gas coming out of solution)** | Low | S | HAMMER cavitation notes; Liou DGCM |
 | [ ] | **Active control valves during transient (PRV/PSV/FCV holding setpoint)** | Low | M–L | W&S; control-valve dynamics literature |
 | [ ] | **Rupture disk / bursting disk** | Low | S | HAMMER; manufacturer burst-pressure data |
@@ -148,8 +148,10 @@ bottomless kernel, so the `surge_open` parity case is byte-identical.
 
 ### Tier 3 (likely skip unless requested)
 
-**Valve curve library** — pure data (the engine already takes arbitrary loss curves);
-add standard globe/gate/ball/needle characteristics. **Air-release / wave-speed
+**Valve curve library** — *(Done.)* pure data (the engine already takes arbitrary
+loss curves); `defineValveOperation({ valveType })` now ships standard
+globe/gate/ball/needle inherent characteristics alongside the butterfly default
+(exported as `VALVE_CURVES`). The default path is byte-identical. **Air-release / wave-speed
 reduction** — a knob we partly get for free from DGCM. **Active control valves** —
 PRV/PSV holding a setpoint *through* the transient is niche for surge work (studies
 usually fix valve positions or script operations). **Rupture disk**, **rigid-column
