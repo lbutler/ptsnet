@@ -10,6 +10,7 @@ import { buildEngineModel, EngineModel } from './serialModel';
 import { ParallelEngine } from '../parallel/parallelEngine';
 import { resolveBackend, WorkerBackend } from '../parallel/workerBackend';
 import { CavitationOptions, PumpTripState } from './boundaryPhase';
+import { UnsteadyFrictionOptions } from './unsteadyFriction';
 import { checkCompatibility } from './validation';
 import { cubicSpline, linspace, roundHalfEven, pyFloorDiv } from './math';
 import {
@@ -131,6 +132,13 @@ export interface SimulationCreateOptions {
    * below the liquid vapor pressure. `true` uses defaults.
    */
   cavitation?: boolean | CavitationOptions;
+  /**
+   * Enable unsteady (Brunone) friction — an instantaneous-acceleration term that
+   * damps repeated transient peaks more realistically than steady friction alone.
+   * `true` estimates the Brunone coefficient per pipe from the Vardy–Brown
+   * shear-decay coefficient; pass options to set it explicitly.
+   */
+  unsteadyFriction?: boolean | UnsteadyFrictionOptions;
 }
 
 /** Streaming / progress / cancellation options for {@link PtsnetSimulation.run}. */
@@ -211,6 +219,7 @@ export class PtsnetSimulation {
   private workerBackend!: WorkerBackend;
   private workers = 1;
   private cavitationOptions?: CavitationOptions;
+  private unsteadyFrictionOptions?: UnsteadyFrictionOptions;
   private t = 0;
   private initialized = false;
   private updatedSettings = false;
@@ -249,6 +258,16 @@ export class PtsnetSimulation {
     sim.workers = options.parallel?.workers ?? hw ?? 4;
     if (options.cavitation) {
       sim.cavitationOptions = options.cavitation === true ? {} : options.cavitation;
+    }
+    if (options.unsteadyFriction) {
+      const uf = options.unsteadyFriction === true ? {} : options.unsteadyFriction;
+      if (uf.coefficient !== undefined && !(uf.coefficient >= 0)) {
+        throw new Error('unsteadyFriction.coefficient must be >= 0');
+      }
+      if (uf.viscosity !== undefined && !(uf.viscosity > 0)) {
+        throw new Error('unsteadyFriction.viscosity must be > 0');
+      }
+      sim.unsteadyFrictionOptions = uf;
     }
     return sim;
   }
@@ -619,6 +638,7 @@ export class PtsnetSimulation {
       this.recording,
       this.cavitationOptions,
       this.buildPumpTripState(),
+      this.unsteadyFrictionOptions,
     );
     this.t = 1;
     this.initialized = true;

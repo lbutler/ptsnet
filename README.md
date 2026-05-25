@@ -81,6 +81,13 @@ sim.addCheckValve(pipeName); // forward-flow-only pipe; shuts on reversal (no ba
 sim.addAirValve(nodeName, { inflowArea, outflowArea }); // combination air/vacuum valve at a high point
 ```
 
+Column separation and unsteady friction are `create` options, not operations:
+
+```ts
+PtsnetSimulation.create({ inp, settings, cavitation: true });        // column separation (DGCM)
+PtsnetSimulation.create({ inp, settings, unsteadyFriction: true });  // Brunone unsteady friction
+```
+
 ### Results
 
 `sim.results` exposes labeled [`ResultSeries`](src/core/results.ts):
@@ -277,6 +284,48 @@ that check to the user; here it's surfaced (and, with `warningsOn`, logged).
 > HAMMER references — those were run without column separation (their heads reach
 > ≈ −327 m pressure head), so cavitation makes ptsnet diverge from them by being
 > more physical, not less.
+
+### Unsteady (Brunone) friction
+
+Steady (Darcy–Weisbach / Hazen–Williams) friction under-damps the repeated peaks
+of a transient: the measured pressure trace decays faster than the steady-friction
+MOC predicts. Enable **unsteady friction** to add the Brunone
+instantaneous-acceleration term (Vítkovský formulation), which damps those peaks
+realistically:
+
+```ts
+const sim = await PtsnetSimulation.create({
+  inp,
+  settings: { duration: 3, timeStep: 2e-4, defaultWaveSpeed: 1200, waveSpeedMethod: 'user' },
+  unsteadyFriction: true, // or { coefficient, viscosity }
+});
+```
+
+The extra friction slope is
+
+```
+J_u = (k / (g·A))·( ∂Q/∂t + a·sign(Q)·|∂Q/∂x| )
+```
+
+with the `sign()` (Vítkovský) making it valid for both flow/wave directions
+(Brunone's original `∂Q/∂t − a·∂Q/∂x` cancels for an upstream-travelling wave).
+It folds into the interior MOC stencil: the local-acceleration part is taken at
+the new time level (implicit — this is what keeps the explicit convective part
+stable), adding `k·B` to each characteristic impedance, and slots in exactly like
+the steady friction.
+
+The **Brunone coefficient `k`** is either supplied (`{ coefficient: 0.03 }`, a
+constant for every pipe) or, by default, estimated per pipe from the Vardy–Brown
+shear-decay coefficient C* and the steady Reynolds number, `k = √C*/2` (HAMMER's
+recommended *Transient Friction* method; `{ viscosity }` sets ν for the Reynolds
+number, default 1e-6 m²/s). Validated in
+[`test/unsteadyFriction.test.ts`](test/unsteadyFriction.test.ts) on a
+reservoir–pipe–valve line: the first (Joukowsky) peak is unchanged while the later
+oscillations decay markedly faster, a larger `k` damps more, and the result is
+bit-identical across worker counts. Unsteady friction is **opt-in** (default runs
+are byte-identical), composes with column separation, and matters most for
+small-scale / laboratory pipelines (its damping signature shrinks on large
+transmission mains).
 
 ## Differences from the Python version
 

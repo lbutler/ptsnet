@@ -10,6 +10,11 @@ import type { CavState, PumpTripState } from './boundaryPhase';
 /**
  * Interior MOC stencil for the inline (single-worker) path. Must stay in sync
  * with the plain branch of the worker source in `parallel/parallelEngine.ts`.
+ *
+ * When `Ku` is given, the Brunone unsteady-friction term is folded in: the
+ * implicit local acceleration adds `k·B` to each characteristic impedance
+ * (`Bp,Bm`) and the explicit convective term shifts `Cp,Cm`. See
+ * {@link ./unsteadyFriction}.
  */
 export function runInteriorStep(
   Q0: Float64Array,
@@ -24,6 +29,7 @@ export function runInteriorStep(
   Bm: Float64Array,
   hasPlus: Int32Array,
   hasMinus: Int32Array,
+  Ku?: Float64Array,
 ): void {
   const n = Q0.length;
   for (let i = 1; i < n - 1; i++) {
@@ -31,8 +37,21 @@ export function runInteriorStep(
     Bm[i] = (B[i] + R[i] * Math.abs(Q0[i + 1])) * hasMinus[i];
     Cp[i] = (H0[i - 1] + B[i] * Q0[i - 1]) * hasPlus[i];
     Bp[i] = (B[i] + R[i] * Math.abs(Q0[i - 1])) * hasPlus[i];
-    H1[i] = (Cp[i] * Bm[i] + Cm[i] * Bp[i]) / (Bp[i] + Bm[i]);
-    Q1[i] = (Cp[i] - Cm[i]) / (Bp[i] + Bm[i]);
+    let cp = Cp[i];
+    let cm = Cm[i];
+    let bp = Bp[i];
+    let bm = Bm[i];
+    if (Ku) {
+      const kB = Ku[i];
+      const q = Q0[i];
+      const e = kB * (sign(q) * Math.abs(Q0[i + 1] - Q0[i - 1]) * 0.5 - q);
+      cp -= e;
+      cm += e;
+      bp += kB;
+      bm += kB;
+    }
+    H1[i] = (cp * bm + cm * bp) / (bp + bm);
+    Q1[i] = (cp - cm) / (bp + bm);
   }
   Cm[0] = H0[1] - B[0] * Q0[1];
   Cp[n - 1] = H0[n - 2] + B[n - 2] * Q0[n - 2];
@@ -65,20 +84,34 @@ export function runInteriorStepCav(
   C3: Float64Array,
   dt: number,
   psi: number,
+  Ku?: Float64Array,
 ): void {
   const n = h0.length;
   for (let i = 1; i < n - 1; i++) {
-    const cp = (h0[i - 1] + B[i] * qd0[i - 1]) * hasPlus[i];
+    const cp0 = (h0[i - 1] + B[i] * qd0[i - 1]) * hasPlus[i];
     const bp = (B[i] + R[i] * Math.abs(qd0[i - 1])) * hasPlus[i];
-    const cm = (h0[i + 1] - B[i] * qu0[i + 1]) * hasMinus[i];
+    const cm0 = (h0[i + 1] - B[i] * qu0[i + 1]) * hasMinus[i];
     const bm = (B[i] + R[i] * Math.abs(qu0[i + 1])) * hasMinus[i];
-    Cp[i] = cp;
+    Cp[i] = cp0;
     Bp[i] = bp;
-    Cm[i] = cm;
+    Cm[i] = cm0;
     Bm[i] = bm;
     if (hasPlus[i] && hasMinus[i]) {
-      const invBp = 1 / bp;
-      const invBm = 1 / bm;
+      let cp = cp0;
+      let cm = cm0;
+      let bpu = bp;
+      let bmu = bm;
+      if (Ku) {
+        const kB = Ku[i];
+        const q = qd0[i];
+        const e = kB * (sign(q) * Math.abs(qd0[i + 1] - qd0[i - 1]) * 0.5 - q);
+        cp -= e;
+        cm += e;
+        bpu += kB;
+        bmu += kB;
+      }
+      const invBp = 1 / bpu;
+      const invBm = 1 / bmu;
       const B1 = invBp + invBm;
       const K1 = cp * invBp + cm * invBm;
       const Qc = gasVol[i] + dt * (1 - psi) * (qd0[i] - qu0[i]) - dt * psi * K1;

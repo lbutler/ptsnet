@@ -23,8 +23,10 @@ Done so far (beyond the base MOC port): single worker-pool engine + inline
 `workers:1`; column separation (DGCM cavitation: interior + valve + junction) with
 a per-element validity report; check valves (pipe-based, auto-imports EPANET `CV`
 pipes); pump trip with rotational inertia (forward quadrant) + forward-only pumps;
-combination air/vacuum valves (finite-orifice); sub-atmospheric single-valve fix.
-**Next on the roadmap: unsteady (Brunone) friction.**
+combination air/vacuum valves (finite-orifice); sub-atmospheric single-valve fix;
+unsteady (Brunone) friction (Vítkovský instantaneous-acceleration term in the
+interior stencil; composes with cavitation).
+**Next on the roadmap: surge-relief valve (SRV).**
 
 ## Architecture & where the code lives
 
