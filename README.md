@@ -27,7 +27,7 @@ transient solution is computed by a self-contained MOC engine that runs on a
 ## Installation
 
 ```sh
-npm install ptsnet epanet-js
+npm install @epanet-js/ptsnet epanet-js
 ```
 
 `epanet-js` is a peer/runtime dependency (it ships the EPANET WASM engine and is
@@ -36,7 +36,7 @@ kept external from the bundle).
 ## Usage
 
 ```ts
-import { PtsnetSimulation } from 'ptsnet';
+import { PtsnetSimulation } from '@epanet-js/ptsnet';
 
 // `inp` is the text of an EPANET .inp file.
 const sim = await PtsnetSimulation.create({
@@ -494,6 +494,39 @@ the working tree (it remains in git history). The frozen parity reference
 (`compare/python_results.json`) keeps guarding against regressions. To regenerate
 it you must restore the Python package from history; see
 [`compare/README.md`](compare/README.md) for the exact steps.
+
+## Publishing to npm (`@epanet-js/ptsnet`)
+
+Released to the public npm registry under the `@epanet-js` scope. `package.json`
+already sets `"name": "@epanet-js/ptsnet"` and `"publishConfig": { "access":
+"public" }`, so a plain `npm publish` goes out publicly.
+
+```sh
+# 1. Confirm you're logged in to the right account
+npm login            # or: npm whoami  to check
+
+# 2. Green tests + a clean working tree (npm version requires this)
+npm test
+git status           # should report "nothing to commit, working tree clean"
+
+# 3. Bump the version (writes package.json, commits, and creates a git tag)
+npm version patch    # or: minor / major
+
+# 4. Dry-run: inspect the tarball without uploading
+npm publish --dry-run
+#    └─ verify the package name is @epanet-js/ptsnet and the tarball
+#       contains only dist/ and examples/
+
+# 5. Publish (the build runs automatically via the prepublishOnly script)
+npm publish          # add --otp=<code> if 2FA prompts you
+
+# 6. Push the version commit and tag
+git push --follow-tags
+```
+
+After it lands, verify at
+<https://www.npmjs.com/package/@epanet-js/ptsnet> and smoke-test a clean
+install in an empty directory: `npm install @epanet-js/ptsnet epanet-js`.
 
 <!-- Cite Us -->
 ## Cite Us
