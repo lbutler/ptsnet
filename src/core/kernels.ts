@@ -641,3 +641,70 @@ export function runAirValves(
     }
   }
 }
+
+/**
+ * Surge-relief valve at a degree-2 node. Stays shut (a transparent series
+ * junction) until the node gauge head rises above the setpoint, then opens — over
+ * `openTime` — and bleeds flow to atmosphere through an orifice, capping the
+ * upsurge; it recloses over `closeTime` once the head drops below the reseat head.
+ * Runs after {@link runGeneralJunction}, which already normalized the boundary
+ * characteristics, so the node continuity with the relief discharge `Q_r` is
+ * `CC − H·BB = Q_r`, with `Q_r = τ·Kq·√(H − z)` (Kq = Cd·A·√(2g), τ ∈ [0,1]).
+ *
+ * The opening fraction τ is ramped explicitly from the shut-valve head `hJunc − z`
+ * (so opening the valve can't immediately command its own reclose), then H is
+ * solved in closed form against that frozen τ. With τ held at 1 the head settles
+ * where `CC − H·BB = Kq·√(H − z)` — the relief cap. State (`srvTau`) persists.
+ *
+ * Reference: Wylie & Streeter, *Fluid Transients in Systems*; Chaudhry, *Applied
+ * Hydraulic Transients* (pressure-relief / surge-relief valves).
+ */
+export function runSrv(
+  H1: Float64Array,
+  Q1: Float64Array,
+  Cp: Float64Array,
+  Bp: Float64Array,
+  Cm: Float64Array,
+  Bm: Float64Array,
+  srvTau: Float64Array,
+  Z: Float64Array,
+  m: EngineModel,
+  dt: number,
+  cav?: CavState,
+): void {
+  for (let i = 0; i < m.srvStart.length; i++) {
+    const s = m.srvStart[i];
+    const e = m.srvEnd[i];
+    const z = Z[m.srvNode[i]];
+    const CC = Cp[s] + Cm[e];
+    const BB = Bp[s] + Bm[e];
+    const hJunc = CC / BB; // degree-2 series-junction head (valve shut)
+    const gauge = hJunc - z; // sensor = shut-valve driving head (breaks feedback chatter)
+
+    // Explicit actuator ramp, before the head solve.
+    let tau = srvTau[i];
+    if (gauge > m.srvSetpoint[i]) tau += m.srvOpenTime[i] > 0 ? dt / m.srvOpenTime[i] : 1;
+    else if (gauge < m.srvReseat[i]) tau -= m.srvCloseTime[i] > 0 ? dt / m.srvCloseTime[i] : 1;
+    if (tau < 0) tau = 0;
+    else if (tau > 1) tau = 1;
+    srvTau[i] = tau;
+
+    // Implicit head solve against the frozen τ.
+    const c = CC - z * BB; // = BB·gauge
+    let H: number;
+    if (tau <= 0 || c <= 0) {
+      H = hJunc; // shut, or sub-atmospheric node: plain series junction (no discharge)
+    } else {
+      const b = tau * m.srvKq[i];
+      let disc = b * b + 4 * BB * c; // ≥ b² ≥ 0
+      if (disc < 0) disc = 0;
+      const x = (2 * c) / (b + Math.sqrt(disc)); // Citardauq form: no cancellation, BB≈0-safe
+      H = z + x * x;
+    }
+    H1[s] = H;
+    H1[e] = H;
+    Q1[s] = Cp[s] - H * Bp[s];
+    Q1[e] = H * Bm[e] - Cm[e]; // Q1[s] − Q1[e] == vented relief flow
+    if (cav) cav.quCur[s] = Q1[s]; // satisfy the qu-face mirror contract under cavitation
+  }
+}

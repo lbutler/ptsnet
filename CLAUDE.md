@@ -25,8 +25,10 @@ a per-element validity report; check valves (pipe-based, auto-imports EPANET `CV
 pipes); pump trip with rotational inertia (forward quadrant) + forward-only pumps;
 combination air/vacuum valves (finite-orifice); sub-atmospheric single-valve fix;
 unsteady (Brunone) friction (Vítkovský instantaneous-acceleration term in the
-interior stencil; composes with cavitation).
-**Next on the roadmap: surge-relief valve (SRV).**
+interior stencil; composes with cavitation); surge-relief valve (SRV:
+orifice-to-atmosphere at a degree-2 node, gauge-head setpoint with finite
+open/close rates + optional reseat).
+**Next on the roadmap: one-way surge tank.**
 
 ## Architecture & where the code lives
 
