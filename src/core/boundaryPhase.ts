@@ -15,6 +15,7 @@ import {
   runPumpStep,
   runPumpTrip,
   runOpenProtections,
+  runOpenTanksEnhanced,
   runClosedProtections,
   runOneWayTanks,
   runAirValves,
@@ -116,6 +117,8 @@ export interface BoundaryState {
   jSb: Float64Array;
   jHH: Float64Array;
   openQT: Float64Array;
+  oeZ: Float64Array; // enhanced open-tank water level [m]
+  oeQT: Float64Array; // enhanced open-tank inflow (previous step) [m³/s]
   closedQT0: Float64Array;
   closedHT0: Float64Array;
   closedVA: Float64Array;
@@ -130,6 +133,8 @@ export interface BoundaryState {
 export function makeBoundaryState(model: EngineModel): BoundaryState {
   const owtZ = new Float64Array(model.owtStart.length);
   owtZ.set(model.owtInitLevel); // seed each tank at its initial water level
+  const oeZ = new Float64Array(model.oeStart.length);
+  oeZ.set(model.oeInitLevel); // seed each enhanced open tank at its initial level
   return {
     E1: new Float64Array(model.numJip),
     D1: new Float64Array(model.numJip),
@@ -137,6 +142,8 @@ export function makeBoundaryState(model: EngineModel): BoundaryState {
     jSb: new Float64Array(model.numJip),
     jHH: new Float64Array(model.numJip),
     openQT: new Float64Array(model.openStart.length),
+    oeZ,
+    oeQT: new Float64Array(model.oeStart.length),
     closedQT0: new Float64Array(model.closedStart.length),
     closedHT0: new Float64Array(model.closedStart.length),
     closedVA: new Float64Array(model.closedStart.length),
@@ -226,6 +233,9 @@ export function runBoundaryPhase(
 
   if (model.openStart.length > 0) {
     runOpenProtections(H0, H1, Q1, Cp, Bp, Cm, Bm, st.openQT, model, timeStep);
+  }
+  if (model.oeStart.length > 0) {
+    runOpenTanksEnhanced(H1, Q1, Cp, Bp, Cm, Bm, st.oeZ, st.oeQT, model, timeStep);
   }
   if (model.closedStart.length > 0) {
     runClosedProtections(
